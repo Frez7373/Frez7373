@@ -1,0 +1,49 @@
+-- Находим подключенный монитор
+local monitor = peripheral.find("monitor")
+if not monitor then
+    print("Monitor not found! Make sure a monitor is connected.")
+    return
+end
+
+-- Настройка монитора
+monitor.setTextScale(1)
+monitor.clear()
+
+-- Функция для отображения времени с часовой стрелкой на экране 4x4
+local function drawClock(hour, minute)
+    -- Очистить экран
+    monitor.clear()
+
+    -- Рассчитываем положение стрелок
+    local hourAngle = (hour % 12) * 30 + (minute / 2) -- Угол часовой стрелки
+    local minuteAngle = minute * 6 -- Угол минутной стрелки
+
+    -- Определим позиции стрелок на экране
+    local hourPos = {x = 2, y = 2} -- Положение часовой стрелки
+    local minutePos = {x = 1, y = 1} -- Положение минутной стрелки
+
+    -- В нашем случае это ограниченная симуляция на маленьком экране
+    -- Просто выводим стрелку для минут и часов
+    monitor.setCursorPos(hourPos.x, hourPos.y)
+    monitor.write("H")
+
+    monitor.setCursorPos(minutePos.x, minutePos.y)
+    monitor.write("M")
+end
+
+-- Основной цикл
+while true do
+    -- Получаем текущее время
+    local hour = os.date("%I") -- Часы в 12-часовом формате
+    local minute = os.date("%M") -- Минуты
+
+    -- Преобразуем время в числа
+    hour = tonumber(hour)
+    minute = tonumber(minute)
+
+    -- Отображаем время на экране
+    drawClock(hour, minute)
+
+    -- Ждем 60 секунд перед обновлением
+    sleep(60)
+end

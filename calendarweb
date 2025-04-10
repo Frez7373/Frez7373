@@ -1,73 +1,37 @@
--- Function to get the day of the week (0 - Sunday, 6 - Saturday)
-local function getDayOfWeek(year, month, day)
-    local a = math.floor((14 - month) / 12)
-    local y = year - a
-    local m = month + 12 * a - 2
-    return (day + y + math.floor(y / 4) - math.floor(y / 100) + math.floor(y / 400) + math.floor((31 * m) / 12)) % 7
+-- Настройка терминала
+term.setTextScale(1)
+term.clear()
+
+-- Определяем дни недели
+local daysOfWeek = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
+
+-- Функция для определения текущего дня недели
+local function getDayOfWeek(day)
+    return daysOfWeek[(day - 1) % 7 + 1]
 end
 
--- Function to print the calendar
-local function printCalendar(year, month)
-    local daysInMonth = {31, (year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0) and 29 or 28), 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
-    local months = {
-        "January", "February", "March", "April", "May", "June", 
-        "July", "August", "September", "October", "November", "December"
-    }
-    local daysOfWeek = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+-- Основной цикл для отображения дней недели
+while true do
+    -- Получаем текущий день игры
+    local day = os.day() -- Возвращает текущий игровой день
+    local currentDayOfWeek = getDayOfWeek(day)
 
-    -- Print the month header
+    -- Очищаем терминал перед выводом
     term.clear()
     term.setCursorPos(1, 1)
-    print("Calendar: " .. months[month] .. " " .. year)
+    term.write("Days of the Week:")
 
-    -- Print the days of the week
-    term.setCursorPos(1, 3)
-    for i, day in ipairs(daysOfWeek) do
-        write(day .. " ")
-    end
-    print()
-
-    -- Get the current day
-    local currentDate = os.date("*t")
-    local currentDay = currentDate.day
-    local currentMonth = currentDate.month
-    local currentYear = currentDate.year
-
-    -- Determine the first day of the month
-    local firstDayOfMonth = getDayOfWeek(year, month, 1)
-    local dayCounter = 1
-
-    -- Print blank spaces until the first day of the month
-    for i = 1, firstDayOfMonth do
-        write("    ")
-    end
-
-    -- Print the days of the month with weekends in red and current day in blue
-    for row = 1, 6 do  -- Up to 6 rows of days
-        for col = 1, 7 do  -- 7 columns (days of the week)
-            if dayCounter <= daysInMonth[month] then
-                -- Check if it's the current day
-                if year == currentYear and month == currentMonth and dayCounter == currentDay then
-                    term.setTextColor(colors.blue)  -- Highlight current day in blue
-                elseif col == 1 or col == 7 then  -- Weekend: Sunday (col 1) and Saturday (col 7)
-                    term.setTextColor(colors.red)  -- Highlight weekends in red
-                else
-                    term.setTextColor(colors.white)  -- Weekdays in white
-                end
-
-                -- Print the day number
-                write(string.format("%2d ", dayCounter))
-                dayCounter = dayCounter + 1
-            else
-                write("    ")  -- Empty space if there are no more days to display
-            end
+    -- Выводим список дней недели, выделяя текущий день
+    for i = 1, #daysOfWeek do
+        local dayName = daysOfWeek[i]
+        term.setCursorPos(1, i + 1)
+        if dayName == currentDayOfWeek then
+            term.write("> " .. dayName) -- Выделяем текущий день
+        else
+            term.write("  " .. dayName)
         end
-        print()  -- Newline after each week
     end
 
-    -- Reset text color to white after printing
-    term.setTextColor(colors.white)
+    -- Ждем 5 секунд перед обновлением
+    sleep(5)
 end
-
--- Example usage: calendar for May 2025
-printCalendar(2025, 5)

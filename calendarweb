@@ -1,0 +1,64 @@
+-- Function to get the day of the week (0 - Sunday, 6 - Saturday)
+local function getDayOfWeek(year, month, day)
+    local a = math.floor((14 - month) / 12)
+    local y = year - a
+    local m = month + 12 * a - 2
+    return (day + y + math.floor(y / 4) - math.floor(y / 100) + math.floor(y / 400) + math.floor((31 * m) / 12)) % 7
+end
+
+-- Function to print the calendar
+local function printCalendar(year, month)
+    local daysInMonth = {31, (year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0) and 29 or 28), 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+    local months = {
+        "January", "February", "March", "April", "May", "June", 
+        "July", "August", "September", "October", "November", "December"
+    }
+    local daysOfWeek = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
+
+    -- Print the month header
+    term.clear()
+    term.setCursorPos(1, 1)
+    print("Calendar: " .. months[month] .. " " .. year)
+
+    -- Print the days of the week
+    term.setCursorPos(1, 3)
+    for i, day in ipairs(daysOfWeek) do
+        write(day:sub(1, 3) .. " ")
+    end
+    print()
+
+    -- Determine the first day of the month
+    local firstDayOfMonth = getDayOfWeek(year, month, 1)
+    local dayCounter = 1
+
+    -- Print blank spaces until the first day of the month
+    for i = 1, firstDayOfMonth do
+        write("    ")
+    end
+
+    -- Print the days of the month
+    for i = firstDayOfMonth, 6 do
+        write(string.format("%2d ", dayCounter))
+        dayCounter = dayCounter + 1
+        if dayCounter > daysInMonth[month] then break end
+    end
+
+    -- Move to the next line
+    print()
+
+    -- Print the remaining days
+    while dayCounter <= daysInMonth[month] do
+        for i = 1, 7 do
+            if dayCounter <= daysInMonth[month] then
+                write(string.format("%2d ", dayCounter))
+                dayCounter = dayCounter + 1
+            else
+                break
+            end
+        end
+        print()
+    end
+end
+
+-- Example usage: calendar for May 2025
+printCalendar(2025, 5)

@@ -1,0 +1,34 @@
+-- Получаем периферийное устройство монитора
+local monitor = peripheral.find("monitor")
+if not monitor then
+    print("Монитор не найден!")
+    return
+end
+
+-- Настройка монитора
+monitor.setTextScale(1)
+monitor.clear()
+
+-- Определяем дни недели
+local daysOfWeek = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
+
+-- Функция для определения дня недели
+local function getDayOfWeek(day)
+    return daysOfWeek[(day - 1) % 7 + 1]
+end
+
+-- Функция для отображения дней недели
+local function displayWeek()
+    while true do
+        -- Получаем текущий день в игре
+        local day = os.day()
+
+        -- Вычисляем текущий день недели
+        local currentDay = getDayOfWeek(day)
+
+        -- Очищаем монитор и выводим дни недели
+        monitor.clear()
+        monitor.setCursorPos(1, 1)
+        monitor.write("Days of the Week:")
+        for i, dayName in ipairs(daysOfWeek) do
+            monitor.setCursorPos(1, i + 1)

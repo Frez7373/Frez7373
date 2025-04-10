@@ -6,7 +6,7 @@ if not terminal then
 end
 
 -- Настройка терминала
-terminal.setTextScale(1)
+terminal.setTextScale(0.5)  -- Устанавливаем масштаб текста на 0.5
 terminal.clear()
 
 -- Определяем дни недели

@@ -29,7 +29,8 @@ while true do
     monitor.write("Days of the Week:")
 
     -- Выводим список дней недели, выделяя текущий день
-    for i, dayName in ipairs(daysOfWeek) do
+    for i = 1, #daysOfWeek do
+        local dayName = daysOfWeek[i]
         monitor.setCursorPos(1, i + 1)
         if dayName == currentDayOfWeek then
             monitor.write("> " .. dayName) -- Выделяем текущий день

@@ -43,46 +43,26 @@ local function printCalendar(year, month)
     end
 
     -- Print the days of the month with weekends in red and current day in blue
-    for i = firstDayOfMonth, 6 do
-        if dayCounter <= daysInMonth[month] then
-            -- Check if it's the current day
-            if year == currentYear and month == currentMonth and dayCounter == currentDay then
-                term.setTextColor(colors.blue)
-            elseif i == 0 or i == 6 then
-                term.setTextColor(colors.red)  -- Weekend in red
-            else
-                term.setTextColor(colors.white)  -- Weekdays in white
-            end
-
-            write(string.format("%2d ", dayCounter))
-            dayCounter = dayCounter + 1
-        end
-        if dayCounter > daysInMonth[month] then break end
-    end
-
-    -- Move to the next line
-    print()
-
-    -- Print the remaining days
-    while dayCounter <= daysInMonth[month] do
-        for i = 1, 7 do
+    for row = 1, 6 do  -- Up to 6 rows of days
+        for col = 1, 7 do  -- 7 columns (days of the week)
             if dayCounter <= daysInMonth[month] then
                 -- Check if it's the current day
                 if year == currentYear and month == currentMonth and dayCounter == currentDay then
                     term.setTextColor(colors.blue)
-                elseif i == 0 or i == 6 then
-                    term.setTextColor(colors.red)  -- Weekend in red
+                elseif col == 1 or col == 7 then  -- Weekend: Sunday (col 1) and Saturday (col 7)
+                    term.setTextColor(colors.red)
                 else
                     term.setTextColor(colors.white)  -- Weekdays in white
                 end
 
+                -- Print the day number
                 write(string.format("%2d ", dayCounter))
                 dayCounter = dayCounter + 1
             else
-                break
+                write("    ")  -- Empty space if there are no more days to display
             end
         end
-        print()
+        print()  -- Newline after each week
     end
 
     -- Reset text color to white after printing

@@ -1,7 +1,7 @@
--- Получаем периферийное устройство монитора
+-- Ищем монитор, подключенный к компьютеру
 local monitor = peripheral.find("monitor")
 if not monitor then
-    print("Монитор не найден!")
+    print("Monitor not found! Make sure a monitor is connected.")
     return
 end
 
@@ -12,39 +12,32 @@ monitor.clear()
 -- Определяем дни недели
 local daysOfWeek = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
 
--- Функция для определения дня недели
+-- Функция для определения текущего дня недели
 local function getDayOfWeek(day)
     return daysOfWeek[(day - 1) % 7 + 1]
 end
 
--- Функция для отображения дней недели
-local function displayWeek()
-    while true do
-        -- Получаем текущий день в игре
-        local day = os.day()
+-- Основной цикл для отображения дней недели
+while true do
+    -- Получаем текущий день игры
+    local day = os.day() -- Возвращает текущий игровой день
+    local currentDayOfWeek = getDayOfWeek(day)
 
-        -- Вычисляем текущий день недели
-        local currentDay = getDayOfWeek(day)
+    -- Очищаем монитор перед выводом
+    monitor.clear()
+    monitor.setCursorPos(1, 1)
+    monitor.write("Days of the Week:")
 
-        -- Очищаем монитор
-        monitor.clear()
-        monitor.setCursorPos(1, 1)
-        monitor.write("Days of the Week:")
-
-        -- Выводим дни недели, выделяя текущий день
-        for i, dayName in ipairs(daysOfWeek) do
-            monitor.setCursorPos(1, i + 1)
-            if dayName == currentDay then
-                monitor.write("> " .. dayName) -- Выделяем текущий день
-            else
-                monitor.write("  " .. dayName)
-            end
+    -- Выводим список дней недели, выделяя текущий день
+    for i, dayName in ipairs(daysOfWeek) do
+        monitor.setCursorPos(1, i + 1)
+        if dayName == currentDayOfWeek then
+            monitor.write("> " .. dayName) -- Выделяем текущий день
+        else
+            monitor.write("  " .. dayName)
         end
-
-        -- Обновляем каждые 5 секунд
-        sleep(5)
     end
-end
 
--- Запускаем отображение дней недели
-displayWeek()
+    -- Ждем 5 секунд перед обновлением
+    sleep(5)
+end

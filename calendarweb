@@ -36,10 +36,18 @@ local function printCalendar(year, month)
         write("    ")
     end
 
-    -- Print the days of the month
+    -- Print the days of the month with weekends in red
     for i = firstDayOfMonth, 6 do
-        write(string.format("%2d ", dayCounter))
-        dayCounter = dayCounter + 1
+        if dayCounter <= daysInMonth[month] then
+            -- Highlight weekends (Saturday and Sunday) in red
+            if i == 0 or i == 6 then
+                term.setTextColor(colors.red)
+            else
+                term.setTextColor(colors.white)
+            end
+            write(string.format("%2d ", dayCounter))
+            dayCounter = dayCounter + 1
+        end
         if dayCounter > daysInMonth[month] then break end
     end
 
@@ -50,6 +58,12 @@ local function printCalendar(year, month)
     while dayCounter <= daysInMonth[month] do
         for i = 1, 7 do
             if dayCounter <= daysInMonth[month] then
+                -- Highlight weekends (Saturday and Sunday) in red
+                if i == 0 or i == 6 then
+                    term.setTextColor(colors.red)
+                else
+                    term.setTextColor(colors.white)
+                end
                 write(string.format("%2d ", dayCounter))
                 dayCounter = dayCounter + 1
             else
@@ -58,6 +72,9 @@ local function printCalendar(year, month)
         end
         print()
     end
+
+    -- Reset text color to white after printing
+    term.setTextColor(colors.white)
 end
 
 -- Example usage: calendar for May 2025

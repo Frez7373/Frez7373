@@ -48,9 +48,9 @@ local function printCalendar(year, month)
             if dayCounter <= daysInMonth[month] then
                 -- Check if it's the current day
                 if year == currentYear and month == currentMonth and dayCounter == currentDay then
-                    term.setTextColor(colors.blue)
+                    term.setTextColor(colors.blue)  -- Highlight current day in blue
                 elseif col == 1 or col == 7 then  -- Weekend: Sunday (col 1) and Saturday (col 7)
-                    term.setTextColor(colors.red)
+                    term.setTextColor(colors.red)  -- Highlight weekends in red
                 else
                     term.setTextColor(colors.white)  -- Weekdays in white
                 end

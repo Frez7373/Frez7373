@@ -14,32 +14,27 @@ local function drawClock(hour, minute)
     -- Очистить экран
     monitor.clear()
 
-    -- Рассчитываем положение стрелок
-    local hourAngle = (hour % 12) * 30 + (minute / 2) -- Угол часовой стрелки
-    local minuteAngle = minute * 6 -- Угол минутной стрелки
+    -- Рассчитываем позиции стрелок для простого отображения
+    local hourPos = {x = 2, y = 2} -- Часовая стрелка
+    local minutePos = {x = 3, y = 2} -- Минутная стрелка
 
-    -- Определим позиции стрелок на экране
-    local hourPos = {x = 2, y = 2} -- Положение часовой стрелки
-    local minutePos = {x = 1, y = 1} -- Положение минутной стрелки
+    -- Используем символы для стрелок, имитируя часы
+    local hourArrow = "H"
+    local minuteArrow = "M"
 
-    -- В нашем случае это ограниченная симуляция на маленьком экране
-    -- Просто выводим стрелку для минут и часов
+    -- Выводим стрелки на экран
     monitor.setCursorPos(hourPos.x, hourPos.y)
-    monitor.write("H")
+    monitor.write(hourArrow)
 
     monitor.setCursorPos(minutePos.x, minutePos.y)
-    monitor.write("M")
+    monitor.write(minuteArrow)
 end
 
 -- Основной цикл
 while true do
     -- Получаем текущее время
-    local hour = os.date("%I") -- Часы в 12-часовом формате
-    local minute = os.date("%M") -- Минуты
-
-    -- Преобразуем время в числа
-    hour = tonumber(hour)
-    minute = tonumber(minute)
+    local hour = tonumber(os.date("%I")) -- Часы в 12-часовом формате
+    local minute = tonumber(os.date("%M")) -- Минуты
 
     -- Отображаем время на экране
     drawClock(hour, minute)

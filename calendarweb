@@ -1,6 +1,13 @@
+-- Проверка наличия терминала
+local terminal = term
+if not terminal then
+    print("Terminal not found!")
+    return
+end
+
 -- Настройка терминала
-term.setTextScale(1)
-term.clear()
+terminal.setTextScale(1)
+terminal.clear()
 
 -- Определяем дни недели
 local daysOfWeek = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
@@ -17,18 +24,18 @@ while true do
     local currentDayOfWeek = getDayOfWeek(day)
 
     -- Очищаем терминал перед выводом
-    term.clear()
-    term.setCursorPos(1, 1)
-    term.write("Days of the Week:")
+    terminal.clear()
+    terminal.setCursorPos(1, 1)
+    terminal.write("Days of the Week:")
 
     -- Выводим список дней недели, выделяя текущий день
     for i = 1, #daysOfWeek do
         local dayName = daysOfWeek[i]
-        term.setCursorPos(1, i + 1)
+        terminal.setCursorPos(1, i + 1)
         if dayName == currentDayOfWeek then
-            term.write("> " .. dayName) -- Выделяем текущий день
+            terminal.write("> " .. dayName) -- Выделяем текущий день
         else
-            term.write("  " .. dayName)
+            terminal.write("  " .. dayName)
         end
     end
 

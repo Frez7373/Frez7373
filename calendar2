@@ -26,9 +26,25 @@ local function displayWeek()
         -- Вычисляем текущий день недели
         local currentDay = getDayOfWeek(day)
 
-        -- Очищаем монитор и выводим дни недели
+        -- Очищаем монитор
         monitor.clear()
         monitor.setCursorPos(1, 1)
         monitor.write("Days of the Week:")
+
+        -- Выводим дни недели, выделяя текущий день
         for i, dayName in ipairs(daysOfWeek) do
             monitor.setCursorPos(1, i + 1)
+            if dayName == currentDay then
+                monitor.write("> " .. dayName) -- Выделяем текущий день
+            else
+                monitor.write("  " .. dayName)
+            end
+        end
+
+        -- Обновляем каждые 5 секунд
+        sleep(5)
+    end
+end
+
+-- Запускаем отображение дней недели
+displayWeek()

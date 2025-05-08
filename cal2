@@ -1,0 +1,40 @@
+-- Получаем периферийное устройство монитора
+local monitor = peripheral.find("monitor")
+if not monitor then
+    print("Монитор не найден!")
+    return
+end
+
+-- Настройка монитора
+monitor.setTextScale(0.5) -- Уменьшаем масштаб текста для 1x1 монитора
+monitor.clear()
+
+-- Определяем дни недели
+local daysOfWeek = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+
+-- Функция для определения дня недели
+local function getDayOfWeek(day)
+    return daysOfWeek[(day - 1) % 7 + 1]
+end
+
+-- Функция для отображения календаря
+local function drawCalendar()
+    while true do
+        -- Получаем текущий день в игре
+        local day = os.day()
+
+        -- Вычисляем день недели
+        local dayOfWeek = getDayOfWeek(day)
+
+        -- Очищаем монитор и выводим данные
+        monitor.clear()
+        monitor.setCursorPos(1, 1)
+        monitor.write(dayOfWeek) -- Выводим только день недели
+
+        -- Обновляем каждые 10 секунд
+        sleep(10)
+    end
+end
+
+-- Запускаем отображение календаря
+drawCalendar()

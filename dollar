@@ -1,0 +1,48 @@
+-- URL to fetch exchange rate data
+local url = "https://api.exchangerate-api.com/v4/latest/USD"
+
+-- Function to fetch exchange rate data from the API
+local function fetchExchangeRate()
+    local response = http.get(url)
+    if response then
+        local data = response.readAll()
+        response.close()
+        return textutils.unserializeJSON(data)
+    else
+        return nil
+    end
+end
+
+-- Function to display data on the monitor
+local function displayOnMonitor(monitor, message)
+    monitor.clear()
+    monitor.setCursorPos(1, 1)
+    monitor.write(message)
+end
+
+-- Main function
+local function main()
+    -- Attach to a connected monitor
+    local monitor = peripheral.find("monitor")
+    if not monitor then
+        print("No monitor found! Please connect one.")
+        return
+    end
+
+    monitor.setTextScale(1) -- Adjust text scale for better readability
+
+    print("Fetching USD to RUB exchange rate...")
+    while true do
+        local rateData = fetchExchangeRate()
+        if rateData and rateData.rates and rateData.rates.RUB then
+            local rate = rateData.rates.RUB
+            local message = string.format("1 USD = %.2f RUB", rate)
+            displayOnMonitor(monitor, message)
+        else
+            displayOnMonitor(monitor, "Error: Unable to fetch exchange rate.")
+        end
+        sleep(60) -- Update every 60 seconds
+    end
+end
+
+main()

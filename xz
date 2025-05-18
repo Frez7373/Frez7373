@@ -15,15 +15,19 @@ end
 
 -- Основной цикл программы
 local function main()
+    print("Получаем курс доллара к рублю...")
     while true do
         local rateData = fetchExchangeRate()
         if rateData and rateData.rates and rateData.rates.RUB then
             local rate = rateData.rates.RUB
             term.clear()
             term.setCursorPos(1, 1)
-            print("Курс доллара к рублю: 1 USD = " .. rate .. " RUB")
+            print("Курс доллара к рублю:")
+            print("1 USD = " .. string.format("%.2f", rate) .. " RUB")
         else
-            print("Ошибка: Не удалось получить данные о курсе валют")
+            term.clear()
+            term.setCursorPos(1, 1)
+            print("Ошибка: Не удалось получить курс валют.")
         end
         sleep(60) -- Обновляем данные каждые 60 секунд
     end

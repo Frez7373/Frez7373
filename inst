@@ -1,0 +1,55 @@
+-- Gravity Defied Installer for CC: Tweaked
+-- Ensure the files are placed in a folder named "gravitydefied" on the root disk
+
+local function copyFile(source, destination)
+    local sourceFile = fs.open(source, "r")
+    if not sourceFile then
+        print("Error: Cannot open source file: " .. source)
+        return false
+    end
+
+    local content = sourceFile.readAll()
+    sourceFile.close()
+
+    local destFile = fs.open(destination, "w")
+    if not destFile then
+        print("Error: Cannot create destination file: " .. destination)
+        return false
+    end
+
+    destFile.write(content)
+    destFile.close()
+
+    print("Copied: " .. source .. " -> " .. destination)
+    return true
+end
+
+local function installFiles(sourceDir, targetDir)
+    if not fs.exists(sourceDir) or not fs.isDir(sourceDir) then
+        print("Error: Source directory does not exist: " .. sourceDir)
+        return
+    end
+
+    if not fs.exists(targetDir) then
+        fs.makeDir(targetDir)
+    end
+
+    for _, file in ipairs(fs.list(sourceDir)) do
+        local sourcePath = fs.combine(sourceDir, file)
+        local targetPath = fs.combine(targetDir, file)
+
+        if fs.isDir(sourcePath) then
+            installFiles(sourcePath, targetPath)
+        else
+            copyFile(sourcePath, targetPath)
+        end
+    end
+end
+
+-- Main Installer Logic
+local sourceFolder = "gravitydefied" -- Folder containing files to install
+local targetFolder = "gravitydefied_installed" -- Target installation directory
+
+print("Starting Gravity Defied Installation...")
+installFiles(sourceFolder, targetFolder)
+print("Installation Complete! Files are in: " .. targetFolder)

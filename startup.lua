@@ -1,21 +1,25 @@
 -- Инициализация компонентов
-local term = require("term")
+local monitor = peripheral.find("monitor")
 local colors = require("colors")
 
--- Настройка экрана
+if not monitor then
+    error("Monitor not found. Please connect a monitor.")
+end
+
+monitor.setTextScale(1)
 local function drawButton(x, y, width, height, text, bgColor, textColor)
-    term.setBackgroundColor(bgColor)
-    term.setTextColor(textColor)
+    monitor.setBackgroundColor(bgColor)
+    monitor.setTextColor(textColor)
     for i = 0, height - 1 do
-        term.setCursorPos(x, y + i)
-        term.write(string.rep(" ", width))
+        monitor.setCursorPos(x, y + i)
+        monitor.write(string.rep(" ", width))
     end
-    term.setCursorPos(x + math.floor((width - #text) / 2), y + math.floor(height / 2))
-    term.write(text)
+    monitor.setCursorPos(x + math.floor((width - #text) / 2), y + math.floor(height / 2))
+    monitor.write(text)
 end
 
 local function drawUI()
-    term.clear()
+    monitor.clear()
     drawButton(10, 5, 20, 3, "Open Door", colors.green, colors.white)
     drawButton(10, 10, 20, 3, "Close Door", colors.red, colors.white)
 end

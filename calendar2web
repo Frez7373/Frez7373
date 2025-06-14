@@ -1,7 +1,7 @@
 -- Ищем монитор, подключенный к компьютеру
-local monitor = peripheral.find("monitor")
-if not monitor then
-    print("Monitor not found! Make sure a monitor is connected.")
+local term = peripheral.find("term")
+if not term then
+    print("term not found! Make sure a term is connected.")
     return
 end
 

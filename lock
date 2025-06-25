@@ -1,0 +1,504 @@
+Skip to content
+ 
+Search Gists
+Search...
+All gists
+Back to GitHub
+@MCJack123
+MCJack123/client.lua
+Last active last month • Report abuse
+Code
+Revisions
+6
+Stars
+1
+Clone this repository at &lt;script src=&quot;https://gist.github.com/MCJack123/9e4636029941463b573e61507b36414b.js&quot;&gt;&lt;/script&gt;
+<script src="https://gist.github.com/MCJack123/9e4636029941463b573e61507b36414b.js"></script>
+Door lock program for ComputerCraft using secure remote servers, supporting optional key expiration & use limits
+client.lua
+-- Save this as startup.lua on each client computer with a drive and modem attached. You can also optionally attach a speaker for audio feedback.
+local secret = "" -- Set this to the same secret that was set in the server file.
+local redstoneSide = "left" -- Set this to the side the redstone signal should be output on.
+local openTime = 5 -- Set this to the number of seconds to keep the door open for.
+local defaultOutput = false -- Set this to the default redstone state for the door. If set to true, this means power will be cut when unlocking.
+                            -- This allows you to place a door sideways, and then have it stay closed even when power is applied externally.
+
+if not secret or secret == "" then error("Please set some keys inside the script before running.") end
+
+local ok, err = pcall(function()
+os.pullEvent = os.pullEventRaw
+settings.set("shell.allow_disk_startup", false)
+
+local sha256
+
+do
+    local MOD = 2^32
+
+    local function rrotate(x, disp)
+        x = x % MOD
+        disp = disp % 32
+        local low = bit32.band(x, 2 ^ disp - 1)
+        return bit32.rshift(x, disp) + bit32.lshift(low, 32 - disp)
+    end
+
+    local k = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+        0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+        0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+        0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+        0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    }
+
+    local function str2hexa(s)
+        return (string.gsub(s, ".", function(c) return string.format("%02x", string.byte(c)) end))
+    end
+
+    local function num2s(l, n)
+        local s = ""
+        for i = 1, n do
+            local rem = l % 256
+            s = string.char(rem) .. s
+            l = (l - rem) / 256
+        end
+        return s
+    end
+
+    local function s232num(s, i)
+        local n = 0
+        for i = i, i + 3 do n = n*256 + string.byte(s, i) end
+        return n
+    end
+
+    local function preproc(msg, len)
+        local extra = 64 - ((len + 9) % 64)
+        len = num2s(8 * len, 8)
+        msg = msg .. "\128" .. string.rep("\0", extra) .. len
+        assert(#msg % 64 == 0)
+        return msg
+    end
+
+    local function initH256(H)
+        H[1] = 0x6a09e667
+        H[2] = 0xbb67ae85
+        H[3] = 0x3c6ef372
+        H[4] = 0xa54ff53a
+        H[5] = 0x510e527f
+        H[6] = 0x9b05688c
+        H[7] = 0x1f83d9ab
+        H[8] = 0x5be0cd19
+        return H
+    end
+
+    local function digestblock(msg, i, H)
+        local w = {}
+        for j = 1, 16 do w[j] = s232num(msg, i + (j - 1)*4) end
+        for j = 17, 64 do
+            local v = w[j - 15]
+            local s0 = bit32.bxor(rrotate(v, 7), rrotate(v, 18), bit32.rshift(v, 3))
+            v = w[j - 2]
+            w[j] = w[j - 16] + s0 + w[j - 7] + bit32.bxor(rrotate(v, 17), rrotate(v, 19), bit32.rshift(v, 10))
+        end
+
+        local a, b, c, d, e, f, g, h = H[1], H[2], H[3], H[4], H[5], H[6], H[7], H[8]
+        for i = 1, 64 do
+            local s0 = bit32.bxor(rrotate(a, 2), rrotate(a, 13), rrotate(a, 22))
+            local maj = bit32.bxor(bit32.band(a, b), bit32.band(a, c), bit32.band(b, c))
+            local t2 = s0 + maj
+            local s1 = bit32.bxor(rrotate(e, 6), rrotate(e, 11), rrotate(e, 25))
+            local ch = bit32.bxor(bit32.band(e, f), bit32.band(bit32.bnot(e), g))
+            local t1 = h + s1 + ch + k[i] + w[i]
+            h, g, f, e, d, c, b, a = g, f, e, d + t1, c, b, a, t1 + t2
+        end
+
+        H[1] = bit32.band(H[1] + a)
+        H[2] = bit32.band(H[2] + b)
+        H[3] = bit32.band(H[3] + c)
+        H[4] = bit32.band(H[4] + d)
+        H[5] = bit32.band(H[5] + e)
+        H[6] = bit32.band(H[6] + f)
+        H[7] = bit32.band(H[7] + g)
+        H[8] = bit32.band(H[8] + h)
+    end
+
+    function sha256(msg)
+        msg = preproc(msg, #msg)
+        local H = initH256({})
+        for i = 1, #msg, 64 do digestblock(msg, i, H) end
+        return str2hexa(num2s(H[1], 4) .. num2s(H[2], 4) .. num2s(H[3], 4) .. num2s(H[4], 4) ..
+            num2s(H[5], 4) .. num2s(H[6], 4) .. num2s(H[7], 4) .. num2s(H[8], 4))
+    end
+end
+
+local speaker = peripheral.find("speaker")
+local modem = peripheral.find("modem")
+modem.open(74)
+redstone.setOutput(redstoneSide, defaultOutput)
+
+while true do
+    local ev, side = os.pullEvent()
+    if ev == "disk" then
+        sleep(0.25)
+        local found = false
+        local file = fs.open("disk/id", "r")
+        if file ~= nil then
+            local id = file.readAll()
+            file.close()
+            local msg = sha256("?:" .. id .. tostring(math.floor(os.epoch("utc") / 1000) .. secret))
+            local channel = math.random(0, 65533)
+            while channel == 74 do channel = math.random(0, 65533) end
+            modem.open(channel)
+            modem.transmit(74, channel, "?:" .. msg)
+            local timer = os.startTimer(3)
+            while true do
+                local ev2, side2, port, reply, message = os.pullEvent()
+                if ev2 == "timer" and side2 == timer then break
+                elseif ev2 == "modem_message" and port == channel and reply == 74 and type(message) == "string" and message:sub(1, 2) == "=:" then
+                    if message == "=:" .. sha256("=:" .. id .. tostring(math.floor(os.epoch("utc") / 1000)) .. secret .. "true") or
+                       message == "=:" .. sha256("=:" .. id .. tostring(math.floor(os.epoch("utc") / 1000) - 1) .. secret .. "true") then found = true break
+                    elseif message == "=:" .. sha256("=:" .. msg .. secret .. "false") then found = false break end
+                end
+            end
+            modem.close(channel)
+        end
+        disk.eject(side)
+        if found then
+            redstone.setOutput(redstoneSide, not defaultOutput)
+            if speaker then speaker.playNote("bit", 1, 24) end
+            sleep(openTime)
+            redstone.setOutput(redstoneSide, defaultOutput)
+        elseif speaker then
+            for i = 1, 3 do 
+                speaker.playNote("bit", 1, 12) 
+                if i < 3 then sleep(0.2) end
+            end
+        end
+        disk.eject(side)
+    end
+end
+end)
+
+if not ok then
+    printError(err)
+    sleep(5)
+end
+
+os.reboot()
+server.lua
+-- Save this as startup.lua on the server computer with a modem attached to the computer. You can also optionally attach a drive to be able to create and erase ID cards.
+local addIDPassword = "" -- Set this to a password that can be used to create a new ID card.
+local secret = "" -- Set this to a randomly-generated secret code. This code should be copied to the secret variable for all clients.
+
+if not addIDPassword or not secret or addIDPassword == "" or secret == "" then error("Please set some keys inside the script before running.") end
+
+if not fs.exists("ids.lua") then
+    local file = fs.open("ids.lua", "w")
+    file.write("return {}")
+    file.close()
+end
+
+local ok, err = pcall(function()
+os.pullEvent = os.pullEventRaw
+settings.set("shell.allow_disk_startup", false)
+
+local sha256, base64encode
+
+do
+    local MOD = 2^32
+
+    local function rrotate(x, disp)
+        x = x % MOD
+        disp = disp % 32
+        local low = bit32.band(x, 2 ^ disp - 1)
+        return bit32.rshift(x, disp) + bit32.lshift(low, 32 - disp)
+    end
+
+    local k = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+        0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+        0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+        0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5,
+        0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    }
+
+    local function str2hexa(s)
+        return (string.gsub(s, ".", function(c) return string.format("%02x", string.byte(c)) end))
+    end
+
+    local function num2s(l, n)
+        local s = ""
+        for i = 1, n do
+            local rem = l % 256
+            s = string.char(rem) .. s
+            l = (l - rem) / 256
+        end
+        return s
+    end
+
+    local function s232num(s, i)
+        local n = 0
+        for i = i, i + 3 do n = n*256 + string.byte(s, i) end
+        return n
+    end
+
+    local function preproc(msg, len)
+        local extra = 64 - ((len + 9) % 64)
+        len = num2s(8 * len, 8)
+        msg = msg .. "\128" .. string.rep("\0", extra) .. len
+        assert(#msg % 64 == 0)
+        return msg
+    end
+
+    local function initH256(H)
+        H[1] = 0x6a09e667
+        H[2] = 0xbb67ae85
+        H[3] = 0x3c6ef372
+        H[4] = 0xa54ff53a
+        H[5] = 0x510e527f
+        H[6] = 0x9b05688c
+        H[7] = 0x1f83d9ab
+        H[8] = 0x5be0cd19
+        return H
+    end
+
+    local function digestblock(msg, i, H)
+        local w = {}
+        for j = 1, 16 do w[j] = s232num(msg, i + (j - 1)*4) end
+        for j = 17, 64 do
+            local v = w[j - 15]
+            local s0 = bit32.bxor(rrotate(v, 7), rrotate(v, 18), bit32.rshift(v, 3))
+            v = w[j - 2]
+            w[j] = w[j - 16] + s0 + w[j - 7] + bit32.bxor(rrotate(v, 17), rrotate(v, 19), bit32.rshift(v, 10))
+        end
+
+        local a, b, c, d, e, f, g, h = H[1], H[2], H[3], H[4], H[5], H[6], H[7], H[8]
+        for i = 1, 64 do
+            local s0 = bit32.bxor(rrotate(a, 2), rrotate(a, 13), rrotate(a, 22))
+            local maj = bit32.bxor(bit32.band(a, b), bit32.band(a, c), bit32.band(b, c))
+            local t2 = s0 + maj
+            local s1 = bit32.bxor(rrotate(e, 6), rrotate(e, 11), rrotate(e, 25))
+            local ch = bit32.bxor(bit32.band(e, f), bit32.band(bit32.bnot(e), g))
+            local t1 = h + s1 + ch + k[i] + w[i]
+            h, g, f, e, d, c, b, a = g, f, e, d + t1, c, b, a, t1 + t2
+        end
+
+        H[1] = bit32.band(H[1] + a)
+        H[2] = bit32.band(H[2] + b)
+        H[3] = bit32.band(H[3] + c)
+        H[4] = bit32.band(H[4] + d)
+        H[5] = bit32.band(H[5] + e)
+        H[6] = bit32.band(H[6] + f)
+        H[7] = bit32.band(H[7] + g)
+        H[8] = bit32.band(H[8] + h)
+    end
+
+    function sha256(msg)
+        msg = preproc(msg, #msg)
+        local H = initH256({})
+        for i = 1, #msg, 64 do digestblock(msg, i, H) end
+        return str2hexa(num2s(H[1], 4) .. num2s(H[2], 4) .. num2s(H[3], 4) .. num2s(H[4], 4) ..
+            num2s(H[5], 4) .. num2s(H[6], 4) .. num2s(H[7], 4) .. num2s(H[8], 4))
+    end
+end
+
+do
+    local extract = _G.bit32 and _G.bit32.extract
+    if not extract then
+        if _G.bit then
+            local shl, shr, band = _G.bit.blshift, _G.bit.brshift, _G.bit.band
+            extract = function( v, from, width )
+                return band( shr( v, from ), shl( 1, width ) - 1 )
+            end
+        elseif _G._VERSION >= "Lua 5.3" then
+            extract = load[[return function( v, from, width )
+                return ( v >> from ) & ((1 << width) - 1)
+            end]]()
+        else
+            extract = function( v, from, width )
+                local w = 0
+                local flag = 2^from
+                for i = 0, width-1 do
+                    local flag2 = flag + flag
+                    if v % flag2 >= flag then
+                        w = w + 2^i
+                    end
+                    flag = flag2
+                end
+                return w
+            end
+        end
+    end
+
+    local DEFAULT_ENCODER = (function( s62, s63, spad )
+        local encoder = {}
+        for b64code, char in pairs{[0]='A','B','C','D','E','F','G','H','I','J',
+            'K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y',
+            'Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n',
+            'o','p','q','r','s','t','u','v','w','x','y','z','0','1','2',
+            '3','4','5','6','7','8','9',s62 or '+',s63 or'/',spad or'='} do
+            encoder[b64code] = char:byte()
+        end
+        return encoder
+    end)()
+
+    local char, concat = string.char, table.concat
+
+    function base64encode( str, encoder, usecaching )
+        encoder = encoder or DEFAULT_ENCODER
+        local t, k, n = {}, 1, #str
+        local lastn = n % 3
+        local cache = {}
+        for i = 1, n-lastn, 3 do
+            local a, b, c = str:byte( i, i+2 )
+            local v = a*0x10000 + b*0x100 + c
+            local s
+            if usecaching then
+                s = cache[v]
+                if not s then
+                    s = char(encoder[extract(v,18,6)], encoder[extract(v,12,6)], encoder[extract(v,6,6)], encoder[extract(v,0,6)])
+                    cache[v] = s
+                end
+            else
+                s = char(encoder[extract(v,18,6)], encoder[extract(v,12,6)], encoder[extract(v,6,6)], encoder[extract(v,0,6)])
+            end
+            t[k] = s
+            k = k + 1
+        end
+        if lastn == 2 then
+            local a, b = str:byte( n-1, n )
+            local v = a*0x10000 + b*0x100
+            t[k] = char(encoder[extract(v,18,6)], encoder[extract(v,12,6)], encoder[extract(v,6,6)], encoder[64])
+        elseif lastn == 1 then
+            local v = str:byte( n )*0x10000
+            t[k] = char(encoder[extract(v,18,6)], encoder[extract(v,12,6)], encoder[64], encoder[64])
+        end
+        return concat( t )
+    end
+end
+
+local modem = peripheral.find("modem")
+modem.open(74)
+
+while true do
+    local ev, side, port, reply, message = os.pullEvent()
+    if ev == "modem_message" and port == 74 and type(message) == "string" and message:sub(1, 2) == "?:" then
+        local found = false
+        local ids = dofile("ids.lua")
+        local delete = {}
+        modem.open(reply)
+        for i,id in ipairs(ids) do
+            if (id.expiration == 0 or id.expiration > os.epoch("utc")) and (id.uses ~= 0) then
+                if message == "?:" .. sha256("?:" .. id.id .. tostring(math.floor(os.epoch("utc") / 1000)) .. secret) or
+                message == "?:" .. sha256("?:" .. id.id .. tostring(math.floor(os.epoch("utc") / 1000) - 1) .. secret) then
+                    found = true
+                    modem.transmit(reply, 74, "=:" .. sha256("=:" .. id.id .. tostring(math.floor(os.epoch("utc") / 1000)) .. secret .. "true"))
+                    if id.uses > 0 then
+                        ids[i].uses = id.uses - 1
+                        local file = fs.open("ids.lua", "w")
+                        file.write("return " .. textutils.serialize(ids))
+                        file.close()
+                    end
+                    break
+                end
+            else table.insert(delete, i) end
+        end
+        if not found then modem.transmit(reply, 74, "=:" .. sha256("=:" .. message:sub(3) .. secret .. "false")) end
+        if reply ~= 74 then modem.close(reply) end
+        if #delete > 0 then
+            for _,i in ipairs(delete) do ids[i] = nil end
+            local file = fs.open("ids.lua", "w")
+            file.write("return " .. textutils.serialize(ids))
+            file.close()
+        end
+    elseif ev == "disk" then
+        if fs.exists("disk/id") then
+            write("Erasing ID card, please enter the password.\n: ")
+            local password
+            parallel.waitForAny(function() sleep(15) end, function() password = read("*") end)
+            if password == addIDPassword then
+                local file = fs.open("disk/id", "r")
+                local id = file.readAll()
+                file.close()
+                local ids = dofile("ids.lua")
+                for i,v in ipairs(ids) do if v.id == id then ids[i] = nil break end end
+                file = fs.open("ids.lua", "w")
+                file.write("return " .. textutils.serialize(ids))
+                file.close()
+                fs.delete("disk/id")
+                disk.setLabel(side, nil)
+                print("Erased ID card.")
+            else print("Incorrect password.") end
+        else
+            write("Writing new ID card, please enter the password.\n: ")
+            local password
+            parallel.waitForAny(function() sleep(15) end, function() password = read("*") end)
+            if password == addIDPassword then
+                print("To skip a value, just press enter without typing anything.")
+                write("Seconds valid? ")
+                local exp = read()
+                write("Maximum uses? ")
+                local uses = read()
+                local id = ""
+                for i = 1, 12 do id = id .. string.char(math.random(0, 255)) end
+                id = base64encode(id)
+                local ids = dofile("ids.lua")
+                ids[#ids+1] = {id = id, expiration = exp == "" and 0 or os.epoch("utc") + (tonumber(exp) * 1000), uses = uses == "" and -1 or tonumber(uses)}
+                local file = fs.open("ids.lua", "w")
+                file.write("return " .. textutils.serialize(ids))
+                file.close()
+                file = fs.open("disk/id", "w")
+                file.write(id)
+                file.close()
+                disk.setLabel(side, "ID Card #" .. #ids)
+                print("Successfully wrote new ID card.")
+            else print("Incorrect password.") end
+        end
+        disk.eject(side)
+    end
+end
+end)
+
+if not ok then
+    printError(err)
+    sleep(5)
+end
+
+os.reboot()
+@Frez7373
+Comment
+ 
+Leave a comment
+ 
+Footer
+© 2025 GitHub, Inc.
+Footer navigation
+Terms
+Privacy
+Security
+Status
+Docs
+Contact
+Manage cookies
+Do not share my personal information
+Door lock program for ComputerCraft using secure remote servers, supporting optional key expiration & use limits

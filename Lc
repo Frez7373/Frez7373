@@ -1,0 +1,23 @@
+-- Настройки
+local side      = "back"     -- сторона, куда подключен красный камень (может быть left, right, top и т.д.)
+local password  = "1234"     -- ваш код
+local openTime  = 3          -- как долго держать сигнал (в секундах)
+
+-- Основной цикл
+while true do
+  term.clear()
+  term.setCursorPos(1, 1)
+  write("Введите код: ")
+  local input = read("*")    -- скрытый ввод
+  if input == password then
+    term.clear()
+    term.setCursorPos(1, 1)
+    print("Код верный! Открываю...")
+    redstone.setOutput(side, true)
+    sleep(openTime)
+    redstone.setOutput(side, false)
+  else
+    print("Неверный код.")
+    sleep(1)
+  end
+end

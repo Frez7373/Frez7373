@@ -1,0 +1,32 @@
+-- Function to perform the operation
+local function calculate(a, b, operation)
+    if operation == "+" then
+        return a + b
+    elseif operation == "-" then
+        return a - b
+    elseif operation == "*" then
+        return a * b
+    elseif operation == "/" then
+        if b ~= 0 then
+            return a / b
+        else
+            return "Error: Division by zero"
+        end
+    else
+        return "Error: Unknown operation"
+    end
+end
+
+-- Main program
+print("Simple Calculator")
+print("Enter the first number:")
+local a = tonumber(io.read())
+
+print("Enter the operation (+, -, *, /):")
+local operation = io.read()
+
+print("Enter the second number:")
+local b = tonumber(io.read())
+
+local result = calculate(a, b, operation)
+print("Result:", result)

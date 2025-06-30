@@ -1,0 +1,27 @@
+-- Проверяем наличие rednet
+if not rednet.isOpen() then
+    rednet.open("back") -- Открываем rednet на задней стороне
+end
+
+-- Функция для воспроизведения звука сигнализации
+local function playAlarm()
+    for i = 1, 5 do -- Воспроизводим звук 5 раз
+        peripheral.call("back", "playNote", "harp", 1, 10) -- Пример использования колонки (замените 'back' на сторону подключения колонок)
+        sleep(0.5)
+    end
+end
+
+-- Основной цикл
+while true do
+    local redstoneSignal = redstone.getInput("front") -- Получаем сигнал с передней стороны
+    
+    if redstoneSignal then
+        -- Отправляем сообщение через rednet
+        rednet.broadcast("Alarm triggered!")
+        
+        -- Воспроизводим сигнализацию
+        playAlarm()
+    end
+
+    sleep(0.1) -- Небольшая задержка для оптимизации
+end

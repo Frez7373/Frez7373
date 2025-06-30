@@ -1,0 +1,40 @@
+-- Проверяем наличие rednet
+if not rednet.isOpen() then
+    rednet.open("back") -- Открываем rednet на задней стороне
+end
+
+-- Проверяем подключение колонки
+local speakerSide = nil
+for _, side in ipairs(peripheral.getNames()) do
+    if peripheral.getType(side) == "speaker" then
+        speakerSide = side
+        break
+    end
+end
+
+if not speakerSide then
+    error("Колонки не обнаружены! Подключите колонку и повторите попытку.")
+end
+
+-- Функция для воспроизведения звука сигнализации
+local function playAlarm()
+    for i = 1, 5 do -- Воспроизводим звук 5 раз
+        peripheral.call(speakerSide, "playSound", "minecraft:block.note_block.harp", 3, 1)
+        sleep(0.5)
+    end
+end
+
+-- Основной цикл
+while true do
+    local redstoneSignal = redstone.getInput("front") -- Получаем сигнал с передней стороны
+    
+    if redstoneSignal then
+        -- Отправляем сообщение через rednet
+        rednet.broadcast("Alarm triggered!")
+        
+        -- Воспроизводим сигнализацию
+        playAlarm()
+    end
+
+    sleep(0.1) -- Небольшая задержка для оптимизации
+end

@@ -1,0 +1,33 @@
+-- Settings
+local side = "back"          -- Side where the redstone signal is sent (e.g., left, right, top, etc.)
+local password = "1234"      -- Your password
+local signalActive = false   -- Tracks the current state of the signal
+
+-- Main loop
+while true do
+  term.clear()
+  term.setCursorPos(1, 1)
+  write("Enter password: ")
+  local input = read("*")    -- Hidden input
+
+  if input == password then
+    signalActive = not signalActive  -- Toggle signal state
+    redstone.setOutput(side, signalActive)
+
+    if signalActive then
+      term.clear()
+      term.setCursorPos(1, 1)
+      print("Correct password! Signal activated.")
+    else
+      term.clear()
+      term.setCursorPos(1, 1)
+      print("Correct password! Signal deactivated.")
+    end
+  else
+    term.clear()
+    term.setCursorPos(1, 1)
+    print("Incorrect password.")
+  end
+
+  sleep(1)
+end

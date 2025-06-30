@@ -6,7 +6,7 @@ end
 -- Функция для воспроизведения звука сигнализации
 local function playAlarm()
     for i = 1, 5 do -- Воспроизводим звук 5 раз
-        peripheral.call("back", "playNote", "harp", 1, 10) -- Пример использования колонки (замените 'back' на сторону подключения колонок)
+        peripheral.call("back", "playSound", "minecraft:block.note_block.harp", 1, 1)
         sleep(0.5)
     end
 end

@@ -1,0 +1,144 @@
+local MODEM_SIDE = "top" -- Измени на сторону, где стоит модем на ПК-клиенте
+
+rednet.open(MODEM_SIDE)
+
+local function findServers()
+    local ids = { rednet.lookup("cloud_disk") }
+    if #ids == 1 and type(ids[1]) == "number" then return ids end
+    if #ids == 0 or ids[1] == nil then return {} end
+    return ids
+end
+
+local serverIDs = findServers()
+if #serverIDs == 0 then
+    print("Error: No Cloud Servers found!")
+    return
+end
+
+-- Авторизация (в точности как в твоем скрипте подключения)
+term.clear()
+term.setCursorPos(1,1)
+print("--- CloudBrowser v1.0 ---")
+print("Connected to " .. #serverIDs .. " Server(s).")
+write("Username: ")
+local username = read()
+write("Password: ")
+local password = read("*") 
+
+-- Функция отправки запросов на сервер
+local function sendRequest(payload, requireAll)
+    payload.username = username
+    payload.password = password
+    serverIDs = findServers()
+    
+    if #serverIDs == 0 then
+        return nil
+    end
+
+    if requireAll then
+        local lastResponse = nil
+        for _, sID in ipairs(serverIDs) do
+            rednet.send(sID, payload, "cloud_disk")
+            local id, response = rednet.receive("cloud_disk", 1.5)
+            if response then lastResponse = response end
+        end
+        return lastResponse
+    else
+        for _, sID in ipairs(serverIDs) do
+            rednet.send(sID, payload, "cloud_disk")
+            local id, response = rednet.receive("cloud_disk", 1.5)
+            if response then return response end
+        end
+        return nil
+    end
+end
+
+-- Отрисовка интерфейса браузера
+local function drawInterface(address, content)
+    term.clear()
+    local w, h = term.getSize()
+    
+    -- Шапка браузера (Адресная строка)
+    term.setBackgroundColor(colors.gray)
+    term.setTextColor(colors.white)
+    term.setCursorPos(1, 1)
+    term.clearLine()
+    write(" URL: cloud://" .. address)
+    
+    -- Разделитель
+    term.setBackgroundColor(colors.black)
+    term.setCursorPos(1, 2)
+    term.setTextColor(colors.lightGray)
+    print(string.rep("-", w))
+    
+    -- Контент страницы
+    term.setTextColor(colors.white)
+    if content then
+        print(content)
+    else
+        term.setTextColor(colors.red)
+        print("\n  404: Page Not Found")
+        term.setTextColor(colors.gray)
+        print("  Make sure the file exists on the cloud server.")
+    end
+    
+    -- Нижняя панель управления
+    term.setBackgroundColor(colors.gray)
+    term.setTextColor(colors.yellow)
+    term.setCursorPos(1, h)
+    term.clearLine()
+    write(" [G] Go to URL  |  [L] List Pages  |  [E] Exit")
+    term.setBackgroundColor(colors.black)
+end
+
+-- Основной цикл работы браузера
+local currentAddress = "index.txt" -- Стартовая страница
+local currentContent = "Welcome to Cloud Network!\nPress 'G' to explore or 'L' to see files."
+
+while true do
+    drawInterface(currentAddress, currentContent)
+    
+    local event, key = os.pullEvent("key")
+    
+    if key == keys.e then
+        -- Выход
+        term.clear()
+        term.setCursorPos(1,1)
+        print("Browser closed.")
+        break
+        
+    elseif key == keys.l then
+        -- Посмотреть список доступных страниц (файлов)
+        currentAddress = "all_pages"
+        local res = sendRequest({action = "list"}, false)
+        if res and res.success then
+            local listStr = "Available cloud pages:\n"
+            for _, filename in ipairs(res.files) do
+                listStr = listStr .. " -> " .. filename .. "\n"
+            end
+            currentContent = listStr
+        else
+            currentContent = "Failed to fetch page list."
+        end
+        
+    elseif key == keys.g then
+        -- Переход на другую страницу
+        local w, h = term.getSize()
+        term.setCursorPos(1, h)
+        term.setBackgroundColor(colors.blue)
+        term.clearLine()
+        write("Enter page name: ")
+        local target = read()
+        
+        if target and target ~= "" then
+            currentAddress = target
+            -- Запрашиваем файл с сервера в реальном времени (без сохранения на диск ПК!)
+            local res = sendRequest({action = "download", filename = target}, false)
+            if res and res.success then
+                currentContent = res.content
+            else
+                currentContent = nil -- Вызовет ошибку 404
+            end
+        end
+    end
+end

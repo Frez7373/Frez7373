@@ -1,0 +1,228 @@
+local MODEM_SIDE = "top" -- Укажи сторону модема
+
+rednet.open(MODEM_SIDE)
+
+-- Константы для скрытой системы доменов (не менять)
+local DNS_USER = "dns_root_system_v2"
+local DNS_PASS = "global_dns_password_123"
+local DNS_FILE = "domains.txt"
+
+local function findServers()
+    local ids = { rednet.lookup("cloud_disk") }
+    if #ids == 1 and type(ids[1]) == "number" then return ids end
+    if #ids == 0 or ids[1] == nil then return {} end
+    return ids
+end
+
+-- Универсальная функция запросов
+local function sendRequest(user, pass, payload)
+    payload.username = user
+    payload.password = pass
+    local serverIDs = findServers()
+    if #serverIDs == 0 then return nil end
+    for _, sID in ipairs(serverIDs) do
+        rednet.send(sID, payload, "cloud_disk")
+        local id, response = rednet.receive("cloud_disk", 1.5)
+        if response then return response end
+    end
+    return nil
+end
+
+-- Инициализация / Скачивание глобального реестра сайтов
+local function getDNS()
+    -- Пробуем скачать реестр
+    local res = sendRequest(DNS_USER, DNS_PASS, {action = "download", filename = DNS_FILE})
+    if res and res.success then
+        return textutils.unserialize(res.content) or {}
+    else
+        -- Если аккаунта нет, регистрируем его
+        sendRequest(DNS_USER, DNS_PASS, {action = "register"})
+        return {}
+    end
+end
+
+-- Сохранение глобального реестра сайтов
+local function saveDNS(dnsData)
+    local content = textutils.serialize(dnsData)
+    sendRequest(DNS_USER, DNS_PASS, {action = "upload", filename = DNS_FILE, content = content})
+end
+
+-- --- ВСТРОЕННЫЙ МЕНЕДЖЕР СОЗДАНИЯ САЙТОВ ---
+local function createSiteManager()
+    term.clear()
+    term.setCursorPos(1,1)
+    print("=== Регистрация нового Сайта ===")
+    
+    write("Придумайте домен (например: shop): cloud://")
+    local domain = read():lower()
+    if domain == "" or domain:match("%s") then
+        print("Ошибка: Домен не должен содержать пробелов.")
+        sleep(2) return
+    end
+    
+    local dns = getDNS()
+    if dns[domain] then
+        print("Ошибка: Этот домен уже занят другим сайтом!")
+        sleep(2) return
+    end
+    
+    print("\nВведите текст вашего сайта.")
+    print("Для сохранения напишите :w на новой строке.")
+    print("----------------------------------------")
+    
+    local lines = {}
+    while true do
+        local line = read()
+        if line == ":w" then break end
+        table.insert(lines, line)
+    end
+    local content = table.concat(lines, "\n")
+    
+    -- Записываем сайт в общую базу данных
+    dns[domain] = content
+    saveDNS(dns)
+    
+    print("\nСайт успешно создан и опубликован!")
+    print("Адрес сайта: cloud://" .. domain)
+    print("Нажмите любую клавишу для возврата...")
+    os.pullEvent("key")
+end
+
+-- --- ПОИСКОВАЯ СИСТЕМА ---
+local function searchEngine(query)
+    local dns = getDNS()
+    local results = {}
+    query = query:lower()
+    
+    for domain, content in pairs(dns) do
+        if domain:find(query) or content:lower():find(query) then
+            table.insert(results, {domain = domain, preview = content:sub(1, 30) .. "..."})
+        end
+    end
+    return results
+end
+
+-- --- ИНТЕРФЕЙС БРАУЗЕРА ---
+local function drawBrowser(mode, target, data)
+    term.clear()
+    local w, h = term.getSize()
+    
+    -- Верхняя навигационная панель
+    term.setBackgroundColor(colors.blue)
+    term.setTextColor(colors.white)
+    term.setCursorPos(1, 1)
+    term.clearLine()
+    
+    if mode == "page" then
+        write(" URL: cloud://" .. target)
+    elseif mode == "search" then
+        write(" Поиск в CloudNet: " .. target)
+    else
+        write(" Главная страница браузера")
+    end
+    
+    -- Контентная зона
+    term.setBackgroundColor(colors.black)
+    term.setCursorPos(1, 3)
+    
+    if mode == "main" then
+        term.setTextColor(colors.lime)
+        print(" Добро пожаловать в CloudNet Browser!")
+        term.setTextColor(colors.white)
+        print("\n Здесь вы можете искать сайты по ключевым словам")
+        print(" или создать свой собственный уникальный домен.")
+        print("\n Нажмите [S] для поиска сайтов.")
+        print(" Нажмите [C] для создания своего сайта.")
+    
+    elseif mode == "page" then
+        term.setTextColor(colors.white)
+        if data then
+            print(data)
+        else
+            term.setTextColor(colors.red)
+            print(" Ошибка 404: Сайт не найден.")
+            term.setTextColor(colors.gray)
+            print(" Проверьте правильность домена или воспользуйтесь поиском.")
+        end
+        
+    elseif mode == "search" then
+        term.setTextColor(colors.yellow)
+        print(" Результаты поиска по запросу '" .. target .. "':")
+        print(string.rep("-", w))
+        term.setTextColor(colors.white)
+        
+        if #data == 0 then
+            print(" Ничего не найдено. Попробуйте другие ключевые слова.")
+        else
+            for i, res in ipairs(data) do
+                if i > h - 5 then break end -- Защита от переполнения экрана
+                term.setTextColor(colors.lime)
+                write(" cloud://" .. res.domain)
+                term.setTextColor(colors.gray)
+                print(" - " .. res.preview)
+            end
+        end
+    end
+    
+    -- Нижний бар управления
+    term.setBackgroundColor(colors.gray)
+    term.setTextColor(colors.yellow)
+    term.setCursorPos(1, h)
+    term.clearLine()
+    write(" [S] Поиск | [G] Перейти на URL | [C] Создать сайт | [H] Домой")
+    term.setBackgroundColor(colors.black)
+end
+
+-- --- ОСНОВНОЙ РАБОЧИЙ ЦИКЛ ---
+local viewMode = "main" -- Варианты: main, page, search
+local viewTarget = ""
+local viewData = nil
+
+while true do
+    drawBrowser(viewMode, viewTarget, viewData)
+    
+    local event, key = os.pullEvent("key")
+    
+    if key == keys.h then
+        -- Домой
+        viewMode = "main"
+        
+    elseif key == keys.c then
+        -- Открыть менеджер создания сайтов
+        createSiteManager()
+        viewMode = "main"
+        
+    elseif key == keys.g then
+        -- Перейти по домену напрямую
+        local w, h = term.getSize()
+        term.setCursorPos(1, h)
+        term.setBackgroundColor(colors.lime)
+        term.setTextColor(colors.black)
+        term.clearLine()
+        write("Введите домен (без cloud://): ")
+        local domain = read():lower()
+        
+        if domain ~= "" then
+            local dns = getDNS()
+            viewMode = "page"
+            viewTarget = domain
+            viewData = dns[domain] -- Получаем контент сайта напрямую из нашей базы доменов
+        end
+        
+    elseif key == keys.s then
+        -- Поисковая строка
+        local w, h = term.getSize()
+        term.setCursorPos(1, h)
+        term.setBackgroundColor(colors.yellow)
+        term.setTextColor(colors.black)
+        term.clearLine()
+        write("Что хотите найти?: ")
+        local query = read()
+        
+        if query ~= "" then
+            viewMode = "search"
+            viewTarget = query
+            viewData = searchEngine(query) -- Ищем совпадения в базе данных сайтов
+        end
+    end
+end

@@ -1,0 +1,362 @@
+local MODEM_SIDE = "top" -- Change to your modem side
+
+rednet.open(MODEM_SIDE)
+
+-- Hidden DNS database credentials (do not change)
+local DNS_USER = "dns_root_system_v2"
+local DNS_PASS = "global_dns_password_123"
+local DNS_FILE = "domains.txt"
+
+local function findServers()
+    local ids = { rednet.lookup("cloud_disk") }
+    if #ids == 1 and type(ids[1]) == "number" then return ids end
+    if #ids == 0 or ids[1] == nil then return {} end
+    return ids
+end
+
+-- Universal network request helper
+local function sendRequest(user, pass, payload)
+    payload.username = user
+    payload.password = pass
+    local serverIDs = findServers()
+    if #serverIDs == 0 then return nil end
+    for _, sID in ipairs(serverIDs) do
+        rednet.send(sID, payload, "cloud_disk")
+        local id, response = rednet.receive("cloud_disk", 1.5)
+        if response then return response end
+    end
+    return nil
+end
+
+-- Fetch the global DNS database
+local function getDNS()
+    local res = sendRequest(DNS_USER, DNS_PASS, {action = "download", filename = DNS_FILE})
+    if res and res.success then
+        return textutils.unserialize(res.content) or {}
+    else
+        -- If the root DNS system doesn't exist yet, register it automatically
+        sendRequest(DNS_USER, DNS_PASS, {action = "register"})
+        return {}
+    end
+end
+
+-- Save the global DNS database back to the cluster
+local function saveDNS(dnsData)
+    local content = textutils.serialize(dnsData)
+    sendRequest(DNS_USER, DNS_PASS, {action = "upload", filename = DNS_FILE, content = content})
+end
+
+-- --- HELPER: PARSE LINKS FROM TEXT ---
+local function extractLinks(text)
+    local links = {}
+    -- Look for patterns matching [Link Name->domain]
+    for name, domain in text:gmatch("%[([^%-%>]+)%-%>([^%]]+)%]") do
+        table.insert(links, { name = name, domain = domain:gsub("%s+", ""):lower() })
+    end
+    return links
+end
+
+local function cleanText(text)
+    -- Remove the internal raw formatting tags when displaying text to the visitor
+    return text:gsub("%[([^%-%>]+)%-%>[^%]]+%]", "%1")
+end
+
+-- --- BUILT-IN WEBSITE & APP BUILDER ---
+local function createSiteManager()
+    term.clear()
+    term.setCursorPos(1,1)
+    print("=== Register a New Website/App ===")
+    
+    write("Choose domain (e.g., store): cloud://")
+    local domain = read():lower()
+    if domain == "" or domain:match("%s") then
+        print("Error: Domain cannot contain spaces.")
+        sleep(2) return
+    end
+    
+    local dns = getDNS()
+    if dns[domain] then
+        print("Error: This domain is already taken!")
+        sleep(2) return
+    end
+    
+    print("\nHow would you like to provide the content?")
+    print("[1] Type text manually inside the editor")
+    print("[2] Import an existing local file / app")
+    write("Select option (1-2): ")
+    local choice = read()
+    
+    local rawContent = ""
+    local contentType = "text" 
+    
+    if choice == "1" then
+        print("\nEnter your website content.")
+        print("Tip: Add links using [Label->domain]")
+        print("Example: Check our [Shop->myshop]")
+        print("To SAVE & PUBLISH, type :w on a new line.")
+        print("----------------------------------------")
+        
+        local lines = {}
+        while true do
+            local line = read()
+            if line == ":w" then break end
+            table.insert(lines, line)
+        end
+        rawContent = table.concat(lines, "\n")
+        
+    elseif choice == "2" then
+        print("\nEnter the absolute local file path.")
+        write("Path (e.g., /disk/game.lua): ")
+        local path = read()
+        
+        if not fs.exists(path) or fs.isDir(path) then
+            print("Error: File does not exist or is a directory.")
+            sleep(2) return
+        end
+        
+        print("\nHow should the browser handle this file?")
+        print("[1] Text Page (Display source code as text)")
+        print("[2] Application (Run it as an executable app)")
+        write("Select execution mode (1-2): ")
+        local modeChoice = read()
+        
+        if modeChoice == "2" then
+            contentType = "app"
+        end
+        
+        local file = fs.open(path, "r")
+        rawContent = file.readAll()
+        file.close()
+        print("Successfully read " .. #rawContent .. " bytes from local file.")
+    else
+        print("Invalid option.")
+        sleep(2) return
+    end
+    
+    -- Commit structured data to the cloud registry
+    dns[domain] = {
+        type = contentType,
+        content = rawContent
+    }
+    saveDNS(dns)
+    
+    print("\nSuccessfully published to cloud://" .. domain .. "!")
+    print("Press any key to return...")
+    os.pullEvent("key")
+end
+
+-- --- SEARCH ENGINE LOGIC ---
+local function searchEngine(query)
+    local dns = getDNS()
+    local results = {}
+    query = query:lower()
+    
+    for domain, data in pairs(dns) do
+        local content = type(data) == "table" and data.content or data
+        local dType = type(data) == "table" and data.type or "text"
+        
+        if domain:find(query) or content:lower():find(query) then
+            table.insert(results, {
+                domain = domain, 
+                preview = "[" .. dType:upper() .. "] " .. cleanText(content):sub(1, 20) .. "..."
+            })
+        end
+    end
+    return results
+end
+
+-- --- APP RUNTIME INTERPRETER ---
+local function runAsApplication(domain, code)
+    term.clear()
+    term.setCursorPos(1, 1)
+    
+    local tempPath = ".browser_cache_" .. domain .. ".lua"
+    local file = fs.open(tempPath, "w")
+    file.write(code)
+    file.close()
+    
+    print("Launching cloud://" .. domain .. "...")
+    sleep(0.5)
+    
+    local success, err = pcall(shell.run, tempPath)
+    
+    if fs.exists(tempPath) then
+        fs.delete(tempPath)
+    end
+    
+    if not success then
+        term.setBackgroundColor(colors.black)
+        term.setTextColor(colors.red)
+        print("\n[Application Crashed]")
+        print("Error: " .. tostring(err))
+        print("\nPress any key to return to browser...")
+        os.pullEvent("key")
+    end
+end
+
+-- --- GUI RENDERER WITH INTERACTIVE LINKS PANEL ---
+local function drawBrowser(mode, target, data, activeLinks)
+    term.clear()
+    local w, h = term.getSize()
+    
+    -- Upper Navigation Bar
+    term.setBackgroundColor(colors.blue)
+    term.setTextColor(colors.white)
+    term.setCursorPos(1, 1)
+    term.clearLine()
+    
+    if mode == "page" then
+        write(" URL: cloud://" .. target)
+    elseif mode == "search" then
+        write(" Search Results: " .. target)
+    else
+        write(" CloudNet Home Page")
+    end
+    
+    -- Main Content Viewport
+    term.setBackgroundColor(colors.black)
+    term.setCursorPos(1, 3)
+    
+    if mode == "main" then
+        term.setTextColor(colors.lime)
+        print(" Welcome to CloudNet Browser!")
+        term.setTextColor(colors.white)
+        print("\n Search the cloud network using keywords or")
+        print(" instantly create your own personal domain.")
+        print("\n Press [S] to Search Websites.")
+        print(" Press [C] to Create / Host a Site or App.")
+    
+    elseif mode == "page" then
+        term.setTextColor(colors.white)
+        if data then
+            print(cleanText(data))
+            
+            -- If the text page contains hyperlinks, draw them clearly above the footer bar
+            if #activeLinks > 0 then
+                term.setCursorPos(1, h - 3)
+                term.setTextColor(colors.cyan)
+                print(string.rep("-", w))
+                write(" Links: ")
+                term.setTextColor(colors.yellow)
+                for i, link in ipairs(activeLinks) do
+                    if i > 4 then break end -- Fit up to 4 links horizontally safely
+                    write("[" .. i .. "] " .. link.name .. "  ")
+                end
+            end
+        else
+            term.setTextColor(colors.red)
+            print(" Error 404: Website Not Found.")
+            term.setTextColor(colors.gray)
+            print(" Double-check the URL or use the built-in search engine.")
+        end
+        
+    elseif mode == "search" then
+        term.setTextColor(colors.yellow)
+        print(" Search results for '" .. target .. "':")
+        print(string.rep("-", w))
+        term.setTextColor(colors.white)
+        
+        if #data == 0 then
+            print(" No results found. Try using different keywords.")
+        else
+            for i, res in ipairs(data) do
+                if i > h - 5 then break end
+                term.setTextColor(colors.lime)
+                write(" cloud://" .. res.domain)
+                term.setTextColor(colors.gray)
+                print(" " .. res.preview)
+            end
+        end
+    end
+    
+    -- Footer Status Bar
+    term.setBackgroundColor(colors.gray)
+    term.setTextColor(colors.yellow)
+    term.setCursorPos(1, h)
+    term.clearLine()
+    write(" [S] Search | [G] Go to URL | [C] Create Site | [H] Home")
+    term.setBackgroundColor(colors.black)
+end
+
+-- --- APP RUNTIME ---
+local viewMode = "main" 
+local viewTarget = ""
+local viewData = nil
+local activeLinks = {}
+
+-- Local function to fetch records and load pages properly
+local function loadPage(domain)
+    local dns = getDNS()
+    local record = dns[domain]
+    activeLinks = {} -- reset
+    
+    if record then
+        if type(record) == "table" and record.type == "app" then
+            runAsApplication(domain, record.content)
+            viewMode = "main"
+        else
+            viewMode = "page"
+            viewTarget = domain
+            viewData = type(record) == "table" and record.content or record
+            activeLinks = extractLinks(viewData)
+        end
+    else
+        viewMode = "page"
+        viewTarget = domain
+        viewData = nil
+    end
+end
+
+while true do
+    drawBrowser(viewMode, viewTarget, viewData, activeLinks)
+    
+    local event, p1 = os.pullEvent()
+    
+    if event == "key" then
+        if p1 == keys.h then
+            viewMode = "main"
+            activeLinks = {}
+            
+        elseif p1 == keys.c then
+            createSiteManager()
+            viewMode = "main"
+            activeLinks = {}
+            
+        elseif p1 == keys.g then
+            local w, h = term.getSize()
+            term.setCursorPos(1, h)
+            term.setBackgroundColor(colors.lime)
+            term.setTextColor(colors.black)
+            term.clearLine()
+            write("Enter domain (omit cloud://): ")
+            local domain = read():lower()
+            
+            if domain ~= "" then
+                loadPage(domain)
+            end
+            
+        elseif p1 == keys.s then
+            local w, h = term.getSize()
+            term.setCursorPos(1, h)
+            term.setBackgroundColor(colors.yellow)
+            term.setTextColor(colors.black)
+            term.clearLine()
+            write("Search Query: ")
+            local query = read()
+            
+            if query ~= "" then
+                viewMode = "search"
+                viewTarget = query
+                viewData = searchEngine(query)
+                activeLinks = {}
+            end
+        end
+        
+    elseif event == "char" and viewMode == "page" and #activeLinks > 0 then
+        -- Convert pressed numeric chars (1-9) to numeric values to trigger link clicks
+        local selection = tonumber(p1)
+        if selection and activeLinks[selection] then
+            loadPage(activeLinks[selection].domain)
+        end
+    end
+end

@@ -1,0 +1,64 @@
+local MODEM_SIDE = "top" -- Измените на вашу сторону модема
+
+rednet.open(MODEM_SIDE)
+
+local function formatBytes(bytes)
+    if bytes > 1024 * 1024 then
+        return string.format("%.2f MB", bytes / (1024 * 1024))
+    elseif bytes > 1024 then
+        return string.format("%.2f KB", bytes / 1024)
+    else
+        return bytes .. " B"
+    end
+end
+
+local function drawUI()
+    term.clear()
+    term.setCursorPos(1,1)
+    print("=================================================")
+    print("        CLOUD CLUSTER MONITOR v1.0              ")
+    print("=================================================")
+    print(string.format("%-7s | %-12s | %-10s | %-10s", "Server", "Storage Type", "Free Space", "Total Files"))
+    print("-------------------------------------------------")
+
+    -- Ищем сервера
+    local servers = { rednet.lookup("cloud_disk") }
+    if #servers == 1 and type(servers[1]) == "number" then servers = {servers[1]} end
+
+    if #servers == 0 or (#servers == 1 and servers[1] == nil) then
+        print("          No active cloud servers found.         ")
+        return
+    end
+
+    for _, sID in ipairs(servers) do
+        -- Отправляем запрос статистики конкретному серверу
+        rednet.send(sID, {action = "get_monitor_stats"}, "cloud_disk")
+        
+        local id, res = rednet.receive("cloud_disk", 1.5)
+        if res and type(res) == "table" then
+            local spaceStr = formatBytes(res.free_space or 0)
+            print(string.format("ID: %-4d | %-12s | %-10s | %-10d", 
+                res.id, 
+                res.storage_type or "Unknown", 
+                spaceStr, 
+                res.files_count or 0
+            ))
+        else
+            print(string.format("ID: %-4d | [OFFLINE/TIMEOUT]                           ", sID))
+        end
+    end
+    print("=================================================")
+    print(" Press [R] to Refresh | Press [Q] to Quit")
+end
+
+-- Цикл работы приложения
+while true do
+    drawUI()
+    local event, key = os.pullEvent("key")
+    if key == keys.q then
+        term.clear()
+        term.setCursorPos(1,1)
+        break
+    end
+    -- Если нажата 'R', цикл просто пойдет на следующую итерацию и обновит экран
+end

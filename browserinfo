@@ -1,0 +1,7 @@
+CloudNet Browser v1.0 is a custom, lightweight web browser designed
+for ComputerCraft that turns your shared network storage into an interactive 
+cloud internet. It allows users to instantly search for websites using keywords, 
+execute live cloud-hosted applications, and navigate text pages seamlessly 
+via built-in numeric shortcuts. Creators can easily build pages using an inline
+text editor with hyperlink support or deploy full apps by importing local scripts 
+directly to custom domains.

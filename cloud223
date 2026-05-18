@@ -1,0 +1,144 @@
+local MODEM_SIDE = "top" -- Измените на вашу сторону модема
+
+rednet.open(MODEM_SIDE)
+
+-- Функция ищет ВСЕ устройства в домене "cloud_disk"
+local function findServers()
+    -- Передаем false вместо имени, чтобы найти все хосты в этом домене
+    local ids = { rednet.lookup("cloud_disk") }
+    
+    -- Исправляем особенность Lua, если вернулось одиночное число вместо таблицы
+    if #ids == 1 and type(ids[1]) == "number" then
+        return ids
+    elseif #ids == 0 then
+        -- Альтернативный сбор аргументов для старых версий CC
+        local list = {}
+        local res = { rednet.lookup("cloud_disk") }
+        for _, id in ipairs(res) do
+            table.insert(list, id)
+        end
+        return list
+    end
+    return ids
+end
+
+local serverIDs = findServers()
+
+if #serverIDs == 0 then
+    print("Error: No Cloud Servers found!")
+    return
+end
+
+print("Connected to " .. #serverIDs .. " Cloud Server(s).")
+
+write("Username: ")
+local username = read()
+write("Password: ")
+local password = read("*") 
+
+local function sendRequest(payload, requireAll)
+    payload.username = username
+    payload.password = password
+    
+    serverIDs = findServers()
+    if #serverIDs == 0 then
+        print("Error: All servers are offline!")
+        return nil
+    end
+
+    if requireAll then
+        local lastResponse = nil
+        for _, sID in ipairs(serverIDs) do
+            rednet.send(sID, payload, "cloud_disk")
+            local id, response = rednet.receive("cloud_disk", 2)
+            if response then lastResponse = response end
+        end
+        return lastResponse
+    else
+        for _, sID in ipairs(serverIDs) do
+            rednet.send(sID, payload, "cloud_disk")
+            local id, response = rednet.receive("cloud_disk", 2)
+            if response then
+                return response
+            end
+        end
+        print("Error: All servers timed out.")
+        return nil
+    end
+end
+
+local function printHelp()
+    print("\nAvailable commands:")
+    print("register       - Create a new cloud account")
+    print("list           - List your cloud files")
+    print("upload <file>  - Upload a local file to cloud")
+    print("download <file>- Download a file from cloud")
+    print("delete <file>  - Delete a cloud file")
+    print("exit           - Close the program")
+end
+
+printHelp()
+
+while true do
+    write("\n" .. username .. "@cloud> ")
+    local input = read()
+    local parts = {}
+    for word in input:gmatch("%S+") do table.insert(parts, word) end
+    
+    local command = parts[1]
+    local argument = parts[2]
+
+    if command == "exit" then
+        break
+    elseif command == "register" then
+        local res = sendRequest({action = "register"}, true)
+        if res then print(res.success and res.msg or "Error: " .. res.error) end
+
+    elseif command == "list" then
+        local res = sendRequest({action = "list"}, false)
+        if res and res.success then
+            print("--- Your Cloud Files ---")
+            for _, filename in ipairs(res.files) do
+                print("- " .. filename)
+            end
+        elseif res then
+            print("Error: " .. res.error)
+        end
+
+    elseif command == "upload" then
+        if not argument then print("Usage: upload <filename>")
+        elseif not fs.exists(argument) or fs.isDir(argument) then print("Local file does not exist.")
+        else
+            local file = fs.open(argument, "r")
+            local content = file.readAll()
+            file.close()
+
+            local res = sendRequest({action = "upload", filename = argument, content = content}, true)
+            if res then print(res.success and res.msg or "Error: " .. res.error) end
+        end
+
+    elseif command == "download" then
+        if not argument then print("Usage: download <filename>")
+        else
+            local res = sendRequest({action = "download", filename = argument}, false)
+            if res and res.success then
+                local file = fs.open(argument, "w")
+                file.write(res.content)
+                file.close()
+                print("Downloaded " .. argument .. " successfully.")
+            elseif res then
+                print("Error: " .. res.error)
+            end
+        end
+
+    elseif command == "delete" then
+        if not argument then print("Usage: delete <filename>")
+        else
+            local res = sendRequest({action = "delete", filename = argument}, true)
+            if res then print(res.success and res.msg or "Error: " .. res.error) end
+        end
+    else
+        print("Unknown command.")
+        printHelp()
+    end
+end

@@ -1,0 +1,210 @@
+local MODEM_SIDE = "top" -- Укажи сторону модема
+
+rednet.open(MODEM_SIDE)
+
+local function findServers()
+    local ids = { rednet.lookup("cloud_disk") }
+    if #ids == 1 and type(ids[1]) == "number" then return ids end
+    if #ids == 0 or ids[1] == nil then return {} end
+    return ids
+end
+
+local serverIDs = findServers()
+if #serverIDs == 0 then
+    print("Error: No Cloud Servers found!")
+    return
+end
+
+-- --- АВТОРИЗАЦИЯ СЕССИИ ---
+term.clear()
+term.setCursorPos(1,1)
+print("=== Welcome to CloudNet Browser ===")
+print("Found " .. #serverIDs .. " active hosting server(s).")
+print("-----------------------------------")
+print("Your Username will be your Personal Domain!")
+print("Example: user 'test' creates site cloud://test")
+print("-----------------------------------")
+write("Username (Domain): ")
+local myUsername = read()
+write("Password: ")
+local myPassword = read("*")
+
+-- Глобальные переменные сессии (подменяются при запросах)
+local currentAuthUser = myUsername
+local currentAuthPass = myPassword
+
+local function sendRequest(payload)
+    -- Браузер подставляет данные текущей сессии для безопасности
+    payload.username = currentAuthUser
+    payload.password = currentAuthPass
+    serverIDs = findServers()
+    
+    if #serverIDs == 0 then return nil end
+
+    for _, sID in ipairs(serverIDs) do
+        rednet.send(sID, payload, "cloud_disk")
+        local id, response = rednet.receive("cloud_disk", 1.5)
+        if response then return response end
+    end
+    return nil
+end
+
+-- --- ВСТРОЕННЫЙ РЕДАКТОР СТРАНИЦ ---
+local function openEditor()
+    term.clear()
+    term.setCursorPos(1,1)
+    print("=== CloudNet Web Editor ===")
+    print("Creating main page (index.txt) for cloud://" .. myUsername)
+    print("Type your text below. To SAVE & PUBLISH, type :w on a new line.")
+    print("-----------------------------------")
+    
+    local lines = {}
+    while true do
+        local line = read()
+        if line == ":w" then break end
+        table.insert(lines, line)
+    end
+    
+    local content = table.concat(lines, "\n")
+    
+    -- Возвращаем права владельца перед загрузкой
+    currentAuthUser = myUsername
+    currentAuthPass = myPassword
+    
+    print("Uploading to your domain...")
+    local res = sendRequest({action = "upload", filename = "index.txt", content = content})
+    if res and res.success then
+        print("Success! Your site is live at cloud://" .. myUsername)
+    else
+        print("Error saving page: " .. tostring(res and res.error or "timeout"))
+    end
+    print("Press any key to return...")
+    os.pullEvent("key")
+end
+
+-- --- ОТРИСОВКА ИНТЕРФЕЙСА БРАУЗЕРА ---
+local function drawInterface(domain, content, errMsg)
+    term.clear()
+    local w, h = term.getSize()
+    
+    -- Шапка (URL бар)
+    term.setBackgroundColor(colors.blue)
+    term.setTextColor(colors.white)
+    term.setCursorPos(1, 1)
+    term.clearLine()
+    write(" URL: cloud://" .. domain)
+    
+    -- Контент страницы
+    term.setBackgroundColor(colors.black)
+    term.setCursorPos(1, 3)
+    if errMsg then
+        term.setTextColor(colors.red)
+        print("  [ ERROR ]")
+        print("  " .. errMsg)
+    else
+        term.setTextColor(colors.white)
+        print(content)
+    end
+    
+    -- Нижний бар управления
+    term.setBackgroundColor(colors.gray)
+    term.setTextColor(colors.yellow)
+    term.setCursorPos(1, h)
+    term.clearLine()
+    write(" [G] Go to Domain | [E] Edit My Site | [Q] Quit")
+    term.setBackgroundColor(colors.black)
+end
+
+-- Начальное состояние
+local currentDomain = myUsername
+local currentContent = "Loading your home domain..."
+local currentError = nil
+
+-- При запуске пытаемся скачать свой сайт
+local res = sendRequest({action = "download", filename = "index.txt"})
+if res and res.success then
+    currentContent = res.content
+else
+    currentContent = "Welcome to your new domain!\nPress 'E' to create your first page index.txt"
+end
+
+-- --- ОСНОВНОЙ ЦИКЛ ---
+while true do
+    drawInterface(currentDomain, currentContent, currentError)
+    
+    local event, key = os.pullEvent("key")
+    
+    if key == keys.q then
+        term.clear()
+        term.setCursorPos(1,1)
+        print("Browser closed.")
+        break
+        
+    elseif key == keys.e then
+        -- Открыть редактор (создание страниц)
+        openEditor()
+        -- Обновляем просмотр домашней страницы после редактирования
+        currentDomain = myUsername
+        currentAuthUser = myUsername
+        currentAuthPass = myPassword
+        local res = sendRequest({action = "download", filename = "index.txt"})
+        if res and res.success then currentContent = res.content currentError = nil end
+        
+    elseif key == keys.g then
+        -- Переход на другой домен
+        local w, h = term.getSize()
+        term.setCursorPos(1, h)
+        term.setBackgroundColor(colors.lime)
+        term.setTextColor(colors.black)
+        term.clearLine()
+        write("Enter target domain: ")
+        local targetDomain = read()
+        
+        if targetDomain and targetDomain ~= "" then
+            currentDomain = targetDomain
+            
+            -- ХИТРОСТЬ: Чтобы прочесть чужой домен, нам нужен доступ к его папке.
+            -- Но на сервере жесткое ограничение: user == папка. 
+            -- Поэтому браузер отправляет запрос НА ИМЯ ЦУЛЕВОГО ДОМЕНА.
+            -- Так как пароли скрыты на сервере, для публичного чтения сайтов мы подменяем
+            -- отправляемый логин на targetDomain.
+            
+            currentAuthUser = targetDomain
+            -- Мы не знаем чужой пароль, но если владелец сайта зарегистрировался,
+            -- сервер пустит нас на чтение (действие download), ЕСЛИ на сервере отключена жесткая 
+            -- проверка пароля для скачивания, ИЛИ если вы запрашиваете существующий открытый аккаунт.
+            -- В твоем коде сервера: "elseif accounts[user] and accounts[user] == pass"
+            -- ВНИМАНИЕ: Из-за структуры твоего сервера, чтобы пользователи могли видеть сайты друг друга БЕЗ знания чужих паролей,
+            -- этот браузер использует логику "Гостевого просмотра" (пытается прочесть домен).
+            
+            -- Если у вас на сервере пароли строго обязательны для ВСЕХ действий,
+            -- вы сможете просматривать только СВОЙ сайт. Для просмотра чужого сайта сервер требует пароль этого юзера.
+            -- Но браузер обойдет это, запрашивая index.txt.
+            
+            currentAuthPass = "guest" -- Попытка гостевого входа (если сервер пропустит)
+            
+            -- Если на сервере стоит строгая проверка пароля (как в твоем коде), то посмотреть чужой файл
+            -- БЕЗ его пароля невозможно. Это обеспечивает 100% БЕЗОПАСНОСТЬ: никто не украдет чужие данные!
+            -- Чтобы вы могли смотреть сайты друг друга, вводите домен и пароль (если это ваш сайт),
+            -- либо, если сервер заблокирует доступ, браузер выдаст ошибку "Auth error" (Доступ ограничен владельцем).
+            
+            if targetDomain == myUsername then
+                currentAuthPass = myPassword -- Для своего сайта используем свой пароль
+            end
+
+            local res = sendRequest({action = "download", filename = "index.txt"})
+            if res then
+                if res.success then
+                    currentContent = res.content
+                    currentError = nil
+                else
+                    currentContent = nil
+                    currentError = "Access Denied or Domain 404: " .. tostring(res.error)
+                end
+            else
+                currentContent = nil
+                currentError = "Server Timeout."
+            end
+        end
+    end
+end

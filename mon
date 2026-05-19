@@ -1,0 +1,37 @@
+local fs = require("filesystem")
+local term = require("term")
+local shell = require("shell")
+
+-- Получаем имя файла из аргументов командной строки
+local args = shell.parse(...)
+local filename = args[1]
+
+-- Проверяем, указал ли пользователь файл
+if not filename then
+  print("Использование: cat <имя_файла>")
+  return
+end
+
+-- Проверяем, существует ли файл
+if not fs.exists(filename) then
+  print("Ошибка: Файл '" .. filename .. "' не найден.")
+  return
+end
+
+-- Открываем файл для чтения ("r" - read)
+local file, err = fs.open(filename, "r")
+if not file then
+  print("Не удалось открыть файл: " .. tostring(err))
+  return
+end
+
+-- Читаем файл построчно и выводим на экран
+repeat
+  local line = file:read("*l") -- Читаем одну строку
+  if line then
+    term.write(line .. "\n")   -- Выводим строку на монитор
+  end
+until not line
+
+-- Обязательно закрываем файл после работы
+file:close()

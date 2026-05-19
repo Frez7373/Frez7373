@@ -1,0 +1,284 @@
+-- ==================== CONFIGURATION ====================
+local TANK_NAME = "create:fluid_tank_0"
+local REFRESH_RATE = 2.0      -- Частота проверки бака и обновления экрана (сек)
+local ANIMATION_SPEED = 0.05   -- Задержка между фреймами механического переворота
+
+-- Подключение периферии
+local tank = peripheral.wrap(TANK_NAME)
+local monitor = peripheral.find("monitor")
+
+if not tank then
+    error("Could not find the fluid tank! Check the name: " .. TANK_NAME)
+end
+
+if not monitor then
+    error("Could not find any attached monitor!")
+end
+
+-- Настройка монитора и его размеров
+monitor.setTextScale(1)
+local width, height = monitor.getSize()
+
+-- Настройка цветов
+local termColor = term.isColor()
+local COLOR_BG = colors.black
+local COLOR_TEXT = termColor and colors.lightGray or colors.white
+local COLOR_FRAME = termColor and colors.green or colors.white
+local COLOR_ALERT = termColor and colors.red or colors.white
+
+-- Инициализация буфера строк экрана пробелами
+local currentLines = {}
+for i = 1, height do
+    currentLines[i] = string.rep(" ", width)
+end
+
+-- Список дней недели для календаря
+local daysOfWeek = {
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
+}
+
+-- Базовые значения для симуляции флуктуаций систем бункера
+local baseEnergy = 98.4
+local baseRad = 12.4
+
+-- ==================== FUNCTIONS ====================
+
+-- 1. Центрирование текста
+local function centerText(text, maxWidth)
+    if #text >= maxWidth then return string.sub(text, 1, maxWidth) end
+    local padLeft = math.floor((maxWidth - #text) / 2)
+    local padRight = maxWidth - #text - padLeft
+    return string.rep(" ", padLeft) .. text .. string.rep(" ", padRight)
+end
+
+-- 2. Отрисовка рамки (Статическая часть)
+local function drawFrame()
+    term.setTextColor(COLOR_FRAME)
+    
+    -- Верхняя и нижняя линии
+    monitor.setCursorPos(1, 1)
+    monitor.write(string.rep("=", width))
+    monitor.setCursorPos(1, height)
+    monitor.write(string.rep("=", width))
+    
+    -- Боковые границы
+    for i = 2, height - 1 do
+        monitor.setCursorPos(1, i)
+        monitor.write("|")
+        monitor.setCursorPos(width, i)
+        monitor.write("|")
+    end
+    
+    -- Главный заголовок по центру верхнего края
+    local title = " [ BUNKER MANAGEMENT SYSTEM v3.0 ] "
+    local startX = math.max(2, math.floor((width - #title) / 2))
+    monitor.setCursorPos(startX, 1)
+    monitor.write(title)
+end
+
+-- 3. Расчет игрового времени и календаря Minecraft
+local function getCalendarAndTime()
+    local hour = math.floor(os.time())
+    local minute = math.floor((os.time() - hour) * 60)
+    local day = os.day()
+    
+    local weekdayIndex = (day - 1) % 7 + 1
+    local weekdayName = daysOfWeek[weekdayIndex]
+    
+    return string.format("Day: %d (%s) | Time: %02d:%02d", day, weekdayName, hour, minute)
+end
+
+-- 4. Глубокий опрос бака на наличие любых жидкостей (Улучшенный парсер количества)
+local function fetchFluidData()
+    local rawData = nil
+    if type(tank.getFluidDetail) == "function" then
+        rawData = tank.getFluidDetail()
+    elseif type(tank.getFluidDetails) == "function" then
+        local details = tank.getFluidDetails()
+        rawData = details and details[1] or details
+    elseif type(tank.tanks) == "function" then
+        local t = tank.tanks()
+        rawData = t and t[1] or t
+    elseif type(tank.getFluids) == "function" then
+        local f = tank.getFluids()
+        rawData = f and f[1] or f
+    end
+
+    -- Если пришел список жидкостей, берем первый элемент
+    if rawData and type(rawData) == "table" and rawData[1] then
+        rawData = rawData[1]
+    end
+    return rawData
+end
+
+-- 5. Симуляция механических плиток-перевертышей (Create Split-Flap)
+local function flipToLines(targetLines)
+    local oldTerm = term.redirect(monitor)
+    
+    for step = 1, 3 do
+        monitor.clear()
+        
+        -- Перерисовываем рамку, чтобы она не мерцала при анимации текста
+        drawFrame()
+        
+        -- Посимвольное сравнение строк и применение анимационных замен
+        for y = 2, height - 1 do
+            local current = currentLines[y] or string.rep(" ", width)
+            local target = targetLines[y] or string.rep(" ", width)
+            local displayStr = ""
+            
+            for x = 2, width - 1 do
+                local cChar = string.sub(current, x, x) or " "
+                local tChar = string.sub(target, x, x) or " "
+                
+                if cChar == tChar then
+                    displayStr = displayStr .. tChar
+                else
+                    if step == 1 then displayStr = displayStr .. "-"
+                    elseif step == 2 then displayStr = displayStr .. "_"
+                    else displayStr = displayStr .. tChar end
+                end
+            end
+            
+            -- Вывод подготовленной анимированной строки
+            monitor.setTextColor(COLOR_TEXT)
+            monitor.setCursorPos(2, y)
+            monitor.write(displayStr)
+        end
+        sleep(ANIMATION_SPEED)
+    end
+    
+    term.redirect(oldTerm)
+    currentLines = targetLines
+end
+
+-- 6. Сборка всех текстовых блоков интерфейса бункера воедино
+local function generateBunkerReport()
+    local lines = {}
+    for i = 1, height do lines[i] = string.rep(" ", width) end
+    
+    -- Блок 1: Время и Календарь
+    lines[3] = "  TIME & CALENDAR SYNCHRONIZATION:"
+    lines[4] = "  " .. getCalendarAndTime()
+    
+    -- Блок 2: Твой статус бака/бойлера Create
+    lines[6] = "  REACTION CHAMBER / BOILER STATUS:"
+    
+    local info = fetchFluidData()
+    local amount = nil
+    local name = nil
+    local capacity = 16000 -- значение по умолчанию
+    
+    -- Узнаем максимальную вместимость бака через функции периферии, если они есть
+    if type(tank.getFluidCapacity) == "function" then
+        capacity = tank.getFluidCapacity()
+    elseif type(tank.getCapacity) == "function" then
+        capacity = tank.getCapacity()
+    end
+    
+    if info and type(info) == "table" then
+        -- Агрессивный поиск количества (проверяем все возможные ключи разных версий модов)
+        amount = info.amount or info.count or info.amountInLevel or info.fluidAmount or info.amountInTank
+        name = info.name or info.displayName or info.id or info.fluid
+        if info.capacity or info.maxAmount then
+            capacity = info.capacity or info.maxAmount
+        end
+        
+        -- Проверка вложенной таблицы contents (часто встречается в CC: Tweaked / Create)
+        if not amount and info.contents and type(info.contents) == "table" then
+            amount = info.contents.amount or info.contents.count or info.contents.fluidAmount
+            name = info.contents.name or info.contents.id or info.contents.fluid
+            if info.contents.capacity then capacity = info.contents.capacity end
+        end
+    end
+    
+    -- Переводим миллилитры (mB) в привычные литры (1 литр = 1000 mB)
+    if amount and amount >= 0 then
+        local fluidName = "UNKNOWN LIQUID"
+        if name then
+            fluidName = tostring(name):match("([^:]+)$") or tostring(name)
+            fluidName = fluidName:upper()
+        elseif amount == 0 then
+            fluidName = "NONE (TANK EMPTY)"
+        end
+        
+        lines[7] = "  LIQUID: " .. fluidName
+        
+        -- Прогресс-бар заполнения бака
+        local barWidth = width - 6
+        if barWidth > 5 then
+            local fillRatio = math.min(1, amount / math.max(1, capacity))
+            local filledChars = math.floor(fillRatio * barWidth)
+            local emptyChars = barWidth - filledChars
+            lines[8] = "  [" .. string.rep("#", filledChars) .. string.rep(".", emptyChars) .. "]"
+        end
+        
+        -- Отображаем объем и в ведрах/литрах (L), и в милливедрах (mB)
+        local liters = amount / 1000
+        local maxLenders = capacity / 1000
+        lines[9] = string.format("  VOLUME: %.1f L / %.1f L (%d mB)", liters, maxLenders, amount)
+    else
+        -- Если мод вообще не вернул таблицу или вернул nil
+        lines[7] = "  LIQUID: NO CONNECTION / DATA ERROR"
+        lines[8] = "  [....................]"
+        lines[9] = "  VOLUME: -- L / -- L (0 mB)"
+    end
+    
+    -- Блок 3: Внутренняя энергосеть бункера
+    local currentEnergy = baseEnergy + (math.random(-10, 15) / 10)
+    if currentEnergy > 100 then currentEnergy = 100 end
+    lines[11] = string.format("  GRID POWER SUPPLY: %.1f%% CORE ACTIVE", currentEnergy)
+    
+    -- Блок 4: Безопасность периметра
+    local secureStatus = true
+    local sides = {"top", "bottom", "left", "right", "front", "back"}
+    for _, side in ipairs(sides) do
+        if rs.getInput(side) then 
+            secureStatus = false 
+            break 
+        end
+    end
+    
+    if secureStatus then
+        lines[13] = "  SECURITY: PERIMETER SECURED [OK]"
+    else
+        lines[13] = "  SECURITY: !! WARNING / MOTION DETECTED !!"
+    end
+    
+    -- Блок 5: Радиационный фон
+    local currentRad = baseRad + (math.random(-8, 8) / 10)
+    lines[15] = string.format("  LIFE SUPPORT: RAD LEVEL STABLE (%.1f mcR/h)", currentRad)
+    
+    return lines
+end
+
+-- ==================== MAIN RUNTIME LOOP ====================
+print("Bunker Control Center is active... Press Ctrl+T to stop.")
+monitor.setBackgroundColor(COLOR_BG)
+monitor.clear()
+
+-- Первый запуск — рисуем базовую структуру рамок
+local old = term.redirect(monitor)
+drawFrame()
+term.redirect(old)
+
+-- Бесконечный цикл обработки и вывода данных
+while true do
+    local newLines = generateBunkerReport()
+    
+    -- Проверка: поменялось ли что-то на экране с момента прошлого тика
+    local changed = false
+    for i = 1, height do
+        if newLines[i] ~= currentLines[i] then
+            changed = true
+            break
+        end
+    end
+    
+    -- Переворачиваем плитки табло только если данные обновились
+    if changed then
+        flipToLines(newLines)
+    end
+    
+    sleep(REFRESH_RATE)
+end

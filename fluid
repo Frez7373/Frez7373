@@ -1,0 +1,140 @@
+-- Configuration
+local TANK_NAME = "create:fluid_tank_0"
+local REFRESH_RATE = 2.0 -- How often to check the tank (in seconds)
+local ANIMATION_SPEED = 0.05 -- Delay between flip frames
+
+-- Find and wrap the tank and monitor
+local tank = peripheral.wrap(TANK_NAME)
+local monitor = peripheral.find("monitor")
+
+if not tank then
+    error("Could not find the fluid tank! Check the name: " .. TANK_NAME)
+end
+
+if not monitor then
+    error("Could not find any attached monitor!")
+end
+
+-- Set up monitor size and scale
+monitor.setTextScale(1)
+local width, height = monitor.getSize()
+
+-- Variables to store the current displayed text
+local currentLines = {}
+for i = 1, height do
+    currentLines[i] = string.rep(" ", width)
+end
+
+-- Helper function to center text
+local function centerText(text, maxWidth)
+    if #text >= maxWidth then return string.sub(text, 1, maxWidth) end
+    local padLeft = math.floor((maxWidth - #text) / 2)
+    local padRight = maxWidth - #text - padLeft
+    return string.rep(" ", padLeft) .. text .. string.rep(" ", padRight)
+end
+
+-- Simulates the mechanical flipping animation of the Create mod
+local function flipToLines(targetLines)
+    -- We animate row by row, or all together. Let's do character replacement over steps
+    -- to look like independent physical flaps changing state.
+    local maxLen = width
+    
+    -- Mechanical boards usually flip through characters. We will do a smooth row-shift 
+    -- or symbol cycling to mimic the physical weight of the flaps.
+    for step = 1, 3 do
+        monitor.clear()
+        for y = 1, height do
+            local current = currentLines[y] or string.rep(" ", width)
+            local target = targetLines[y] or string.rep(" ", width)
+            local displayStr = ""
+            
+            for x = 1, width do
+                local cChar = string.sub(current, x, x)
+                local tChar = string.sub(target, x, x)
+                
+                if cChar == tChar then
+                    displayStr = displayStr .. tChar
+                else
+                    -- Standard mechanical flip noise/visual replacement
+                    if step == 1 then displayStr = displayStr .. "-"
+                    elseif step == 2 then displayStr = displayStr .. "_"
+                    else displayStr = displayStr .. tChar end
+                end
+            end
+            
+            monitor.setCursorPos(1, y)
+            monitor.write(displayStr)
+        end
+        sleep(ANIMATION_SPEED)
+    end
+    
+    -- Save the state
+    currentLines = targetLines
+end
+
+-- Formats the tank data into readable layout lines
+local function getTankDisplayLines()
+    local info = tank.getFluidDetail()
+    local lines = {}
+    
+    -- Initialize blank lines
+    for i = 1, height do lines[i] = string.rep(" ", width) end
+    
+    -- Header line
+    lines[1] = centerText("== BOILER STATUS ==", width)
+    
+    if info and info.amount > 0 then
+        -- Format fluid name (e.g., "minecraft:lava" -> "LAVA")
+        local fluidName = info.name:match("([^:]+)$") or info.name
+        fluidName = fluidName:upper()
+        
+        lines[3] = centerText("LIQUID: " .. fluidName, width)
+        
+        -- Format amount (e.g., "4000 mB / 16000 mB")
+        local amountStr = string.format("%d mB", info.amount)
+        lines[4] = centerText(amountStr, width)
+        
+        -- Progress bar mimicking Create's clean aesthetics
+        local barWidth = width - 4
+        if barWidth > 5 then
+            -- Safely estimate capacity if method doesn't exist (default 16000 for standard small tanks)
+            local capacity = tank.getFluidCapacity and tank.getFluidCapacity() or 16000
+            local fillRatio = math.min(1, info.amount / capacity)
+            local filledChars = math.floor(fillRatio * barWidth)
+            local emptyChars = barWidth - filledChars
+            
+            local bar = "[" .. string.rep("#", filledChars) .. string.rep(".", emptyChars) .. "]"
+            lines[5] = centerText(bar, width)
+        end
+    else
+        lines[3] = centerText("TANK EMPTY", width)
+        lines[4] = centerText("0 / 0 mB", width)
+    end
+    
+    return lines
+end
+
+-- Main Loop
+print("Display board is running... Press Ctrl+T to stop.")
+monitor.setBackgroundColor(colors.black)
+monitor.setTextColor(colors.white)
+monitor.clear()
+
+while true do
+    local newLines = getTankDisplayLines()
+    
+    -- Only trigger the heavy flip animation if data actually changed
+    local changed = false
+    for i = 1, height do
+        if newLines[i] ~= currentLines[i] then
+            changed = true
+            break
+        end
+    end
+    
+    if changed then
+        flipToLines(newLines)
+    end
+    
+    sleep(REFRESH_RATE)
+end

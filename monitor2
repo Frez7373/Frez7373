@@ -1,0 +1,112 @@
+-- Прямое подключение к компонентам без использования require
+local gpu = component.list("gpu")() and component.proxy(component.list("gpu")())
+local computer_comp = component.list("computer")() and component.proxy(component.list("computer")())
+local redstone = component.list("redstone")() and component.proxy(component.list("redstone")())
+
+-- Цветовая палитра
+local COLOR_BG = 0x0F0F0F       
+local COLOR_TEXT = 0xCCCCCC     
+local COLOR_FRAME = 0x00FF00    
+local COLOR_ALERT = 0xFF0000    
+local COLOR_WARN = 0xFFFF00     
+
+if gpu then
+    gpu.setBackground(COLOR_BG)
+    gpu.setForeground(COLOR_TEXT)
+    
+    local w, h = gpu.getResolution()
+    gpu.fill(1, 1, w, h, " ") -- Очистка экрана вместо term.clear()
+
+    -- Функция отрисовки рамки интерфейса
+    local function drawFrame()
+        gpu.setForeground(COLOR_FRAME)
+        gpu.fill(1, 1, w, 1, "═")
+        gpu.fill(1, h, w, 1, "═")
+        gpu.fill(1, 2, 1, h - 2, "║")
+        gpu.fill(w, 2, 1, h - 2, "║")
+        gpu.set(1, 1, "╔")
+        gpu.set(w, 1, "╗")
+        gpu.set(1, h, "╚")
+        gpu.set(w, h, "╝")
+        gpu.set(4, 1, " [ BUNKER MANAGEMENT SYSTEM v2.6 ] ")
+    end
+
+    -- Получение времени мира Minecraft
+    local function getMinecraftTime()
+        local totalTicks = (computer_comp and computer.time()) or 0
+        local day = math.floor(totalTicks / 24000) + 1
+        local hour = math.floor((totalTicks % 24000) / 1000) + 6
+        if hour >= 24 then hour = hour - 24 end
+        local minute = math.floor(((totalTicks % 24000) % 1000) * 60 / 1000)
+        
+        return string.format("Day: %d | Time: %02d:%02d", day, hour, minute)
+    end
+
+    drawFrame()
+
+    -- Главный цикл
+    while true do
+        -- 1. TIME
+        gpu.setForeground(COLOR_FRAME)
+        gpu.set(4, 3, "TIME & SYNCHRONIZATION:")
+        gpu.setForeground(COLOR_TEXT)
+        gpu.set(4, 4, getMinecraftTime() .. "    ")
+
+        -- 2. POWER
+        gpu.setForeground(COLOR_FRAME)
+        gpu.set(4, 6, "POWER SUPPLY:")
+        
+        local energy = computer_comp and computer_comp.energy() or 0
+        local maxEnergy = computer_comp and computer_comp.maxEnergy() or 1
+        local energyPercent = (energy / maxEnergy) * 100
+        
+        if energyPercent < 20 then
+            gpu.setForeground(COLOR_ALERT)
+        elseif energyPercent < 50 then
+            gpu.setForeground(COLOR_WARN)
+        else
+            gpu.setForeground(0x00FF00)
+        end
+        
+        local progressBars = math.floor(energyPercent / 5)
+        local barStr = string.rep("█", progressBars) .. string.rep("░", 20 - progressBars)
+        gpu.set(4, 7, string.format("OS Core: [%s] %.1f%%  ", barStr, energyPercent))
+
+        -- 3. SECURITY
+        gpu.setForeground(COLOR_FRAME)
+        gpu.set(4, 9, "PERIMETER SECURITY & AIRLOCKS:")
+        
+        local secureStatus = true
+        if redstone then
+            for side = 0, 5 do
+                if redstone.getInput(side) > 0 then
+                    secureStatus = false
+                    break
+                end
+            end
+        end
+        
+        if secureStatus then
+            gpu.setForeground(0x00FF00)
+            gpu.set(4, 10, "Status: PERIMETER SECURED [OK]          ")
+        else
+            gpu.setForeground(COLOR_ALERT)
+            gpu.set(4, 10, "WARNING: MOTION DETECTED / GATE OPEN   ")
+        end
+
+        -- 4. LIFE SUPPORT
+        gpu.setForeground(COLOR_FRAME)
+        gpu.set(4, 12, "LIFE SUPPORT & FILTERS:")
+        gpu.setForeground(COLOR_TEXT)
+        gpu.set(4, 13, "Ventilation: RECIRCULATION [100%]")
+        gpu.set(4, 14, "Radiation Level: STABLE (12 mcR/h)")
+
+        -- Вместо os.sleep используем системную задержку компьютера
+        local deadline = computer.uptime() + 1
+        while computer.uptime() < deadline do
+            -- Ожидание секунды без сильной нагрузки на сервер
+        end
+    end
+else
+    print("Error: GPU component not found!")
+end

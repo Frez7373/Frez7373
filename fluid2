@@ -1,0 +1,156 @@
+-- Configuration
+local TANK_NAME = "create:fluid_tank_0"
+local REFRESH_RATE = 2.0 -- How often to check the tank (in seconds)
+local ANIMATION_SPEED = 0.05 -- Delay between flip frames
+
+-- Find and wrap the tank and monitor
+local tank = peripheral.wrap(TANK_NAME)
+local monitor = peripheral.find("monitor")
+
+if not tank then
+    error("Could not find the fluid tank! Check the name: " .. TANK_NAME)
+end
+
+if not monitor then
+    error("Could not find any attached monitor!")
+end
+
+-- Set up monitor size and scale
+monitor.setTextScale(1)
+local width, height = monitor.getSize()
+
+-- Variables to store the current displayed text
+local currentLines = {}
+for i = 1, height do
+    currentLines[i] = string.rep(" ", width)
+end
+
+-- Helper function to center text
+local function centerText(text, maxWidth)
+    if #text >= maxWidth then return string.sub(text, 1, maxWidth) end
+    local padLeft = math.floor((maxWidth - #text) / 2)
+    local padRight = maxWidth - #text - padLeft
+    return string.rep(" ", padLeft) .. text .. string.rep(" ", padRight)
+end
+
+-- Simulates the mechanical flipping animation of the Create mod
+local function flipToLines(targetLines)
+    for step = 1, 3 do
+        monitor.clear()
+        for y = 1, height do
+            local current = currentLines[y] or string.rep(" ", width)
+            local target = targetLines[y] or string.rep(" ", width)
+            local displayStr = ""
+            
+            for x = 1, width do
+                local cChar = string.sub(current, x, x)
+                local tChar = string.sub(target, x, x)
+                
+                if cChar == tChar then
+                    displayStr = displayStr .. tChar
+                else
+                    if step == 1 then displayStr = displayStr .. "-"
+                    elseif step == 2 then displayStr = displayStr .. "_"
+                    else displayStr = displayStr .. tChar end
+                end
+            end
+            
+            monitor.setCursorPos(1, y)
+            monitor.write(displayStr)
+        end
+        sleep(ANIMATION_SPEED)
+    end
+    currentLines = targetLines
+end
+
+-- Safely extracts fluid info regardless of the API version
+local function fetchFluidData()
+    -- Method 1: getFluidDetail (Original spec)
+    if type(tank.getFluidDetail) == "function" then
+        return tank.getFluidDetail()
+    -- Method 2: getFluidDetails (Plural version)
+    elseif type(tank.getFluidDetails) == "function" then
+        local details = tank.getFluidDetails()
+        return details and details[1] or nil
+    -- Method 3: tanks / getFluids (Standard multi-tank API structure)
+    elseif type(tank.tanks) == "function" then
+        local t = tank.tanks()
+        return t and t[1] or nil
+    elseif type(tank.getFluids) == "function" then
+        local f = tank.getFluids()
+        return f and f[1] or nil
+    end
+    return nil
+end
+
+-- Formats the tank data into readable layout lines
+local function getTankDisplayLines()
+    local info = fetchFluidData()
+    local lines = {}
+    
+    for i = 1, height do lines[i] = string.rep(" ", width) end
+    
+    lines[1] = centerText("== BOILER STATUS ==", width)
+    
+    -- Check if we have fluid data and if amount or amount/count is greater than 0
+    if info and ((info.amount and info.amount > 0) or (info.count and info.count > 0)) then
+        local amount = info.amount or info.count
+        local rawName = info.name or info.displayName or "Unknown"
+        
+        -- Clean up names like "minecraft:lava" -> "LAVA"
+        local fluidName = rawName:match("([^:]+)$") or rawName
+        fluidName = fluidName:upper()
+        
+        lines[3] = centerText("LIQUID: " .. fluidName, width)
+        
+        local amountStr = string.format("%d mB", amount)
+        lines[4] = centerText(amountStr, width)
+        
+        local barWidth = width - 4
+        if barWidth > 5 then
+            -- Fallback capacity handling
+            local capacity = 16000
+            if type(tank.getFluidCapacity) == "function" then
+                capacity = tank.getFluidCapacity()
+            elseif info.capacity then
+                capacity = info.capacity
+            end
+            
+            local fillRatio = math.min(1, amount / capacity)
+            local filledChars = math.floor(fillRatio * barWidth)
+            local emptyChars = barWidth - filledChars
+            
+            local bar = "[" .. string.rep("#", filledChars) .. string.rep(".", emptyChars) .. "]"
+            lines[5] = centerText(bar, width)
+        end
+    else
+        lines[3] = centerText("TANK EMPTY", width)
+        lines[4] = centerText("0 / 0 mB", width)
+    end
+    
+    return lines
+end
+
+-- Main Loop
+print("Display board is running... Press Ctrl+T to stop.")
+monitor.setBackgroundColor(colors.black)
+monitor.setTextColor(colors.white)
+monitor.clear()
+
+while true do
+    local newLines = getTankDisplayLines()
+    
+    local changed = false
+    for i = 1, height do
+        if newLines[i] ~= currentLines[i] then
+            changed = true
+            break
+        end
+    end
+    
+    if changed then
+        flipToLines(newLines)
+    end
+    
+    sleep(REFRESH_RATE)
+end

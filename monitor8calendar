@@ -1,0 +1,137 @@
+-- Ищем подключенный внешний монитор
+local monitor = peripheral.find("monitor")
+
+if not monitor then
+    error("External monitor not found! Connect a Monitor block.")
+end
+
+-- Перенаправляем весь вывод term на внешний монитор
+local oldTerm = term.redirect(monitor)
+
+-- Настройки цветов
+local termColor = term.isColor()
+local COLOR_BG = colors.black
+local COLOR_TEXT = termColor and colors.lightGray or colors.white
+local COLOR_FRAME = termColor and colors.green or colors.white
+local COLOR_ALERT = termColor and colors.red or colors.white
+
+term.setBackgroundColor(COLOR_BG)
+term.setTextColor(COLOR_TEXT)
+term.clear()
+
+-- Получаем размер внешнего монитора
+local w, h = term.getSize()
+
+-- Список дней недели для календаря
+local daysOfWeek = {
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday"
+}
+
+local function drawFrame()
+    term.setTextColor(COLOR_FRAME)
+    
+    term.setCursorPos(1, 1)
+    write(string.rep("=", w))
+    term.setCursorPos(1, h)
+    write(string.rep("=", w))
+    
+    for i = 2, h - 1 do
+        term.setCursorPos(1, i)
+        write("|")
+        term.setCursorPos(w, i)
+        write("|")
+    end
+    
+    local title = " [ BUNKER MANAGEMENT SYSTEM v2.6 ] "
+    local startX = math.max(2, math.floor((w - #title) / 2))
+    term.setCursorPos(startX, 1)
+    write(title)
+end
+
+local function getCalendarAndTime()
+    local hour = math.floor(os.time())
+    local minute = math.floor((os.time() - hour) * 60)
+    local day = os.day()
+    
+    -- Высчитываем день недели по календарю (от 1 до 7)
+    local weekdayIndex = (day - 1) % 7 + 1
+    local weekdayName = daysOfWeek[weekdayIndex]
+    
+    return string.format("Day: %d (%s) | Time: %02d:%02d", day, weekdayName, hour, minute)
+end
+
+-- Инициализация базовых значений
+local baseEnergy = 98.4
+local baseRad = 12.4
+
+-- Отрисовка статической рамки
+drawFrame()
+
+-- Главный цикл обновлений
+while true do
+    -- 1. TIME & SYNCHRONIZATION (Включая Календарь)
+    term.setTextColor(COLOR_FRAME)
+    term.setCursorPos(4, 3)
+    write("TIME & CALENDAR SYNCHRONIZATION:")
+    term.setTextColor(COLOR_TEXT)
+    term.setCursorPos(4, 4)
+    write(getCalendarAndTime() .. "       ") -- пробелы затирают старый текст
+
+    -- 2. POWER SUPPLY STATUS
+    local currentEnergy = baseEnergy + (math.random(-10, 15) / 10)
+    if currentEnergy > 100 then currentEnergy = 100 end
+    
+    term.setTextColor(COLOR_FRAME)
+    term.setCursorPos(4, 6)
+    write("POWER SUPPLY:")
+    term.setTextColor(COLOR_TEXT)
+    term.setCursorPos(4, 7)
+    
+    local barLength = math.floor(currentEnergy / 5)
+    local barStr = string.rep("=", barLength) .. string.rep(" ", 20 - barLength)
+    write(string.format("OS Core: [%s] %.1f%%  ", barStr, currentEnergy))
+
+    -- 3. PERIMETER SECURITY
+    term.setTextColor(COLOR_FRAME)
+    term.setCursorPos(4, 9)
+    write("PERIMETER SECURITY & AIRLOCKS:")
+    
+    local secureStatus = true
+    local sides = {"top", "bottom", "left", "right", "front", "back"}
+    for _, side in ipairs(sides) do
+        if rs.getInput(side) then
+            secureStatus = false
+            break
+        end
+    end
+    
+    term.setCursorPos(4, 10)
+    if secureStatus then
+        term.setTextColor(termColor and colors.green or colors.white)
+        write("Status: PERIMETER SECURED [OK]          ")
+    else
+        term.setTextColor(COLOR_ALERT)
+        write("WARNING: MOTION DETECTED / GATE OPEN   ")
+    end
+
+    -- 4. LIFE SUPPORT SYSTEM
+    local currentRad = baseRad + (math.random(-8, 8) / 10)
+    
+    term.setTextColor(COLOR_FRAME)
+    term.setCursorPos(4, 12)
+    write("LIFE SUPPORT & FILTERS:")
+    term.setTextColor(COLOR_TEXT)
+    term.setCursorPos(4, 13)
+    write("Ventilation: RECIRCULATION [100%]")
+    
+    term.setCursorPos(4, 14)
+    write(string.format("Radiation Level: STABLE (%.1f mcR/h)   ", currentRad))
+
+    sleep(1)
+end

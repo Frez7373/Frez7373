@@ -1,0 +1,115 @@
+-- ==================== CONFIGURATION ====================
+local MODEM_CHANNEL = 99                -- Тот же беспроводной канал, что и на сервере
+local ANIMATION_SPEED = 0.05            -- Скорость переворота табло
+
+-- Подключение беспроводного модема
+local wirelessModem = peripheral.find("modem", function(name, object) return object.isWireless() end)
+if not wirelessModem then 
+    error("Client Error: Ender Modem not found! Attach it to the computer.") 
+end
+
+-- Настройка вывода на СОБСТВЕННЫЙ экран компьютера
+local width, height = term.getSize()
+
+local COLOR_BG = colors.black
+local COLOR_FRAME = colors.green
+
+-- Буфер строк экрана клиента
+local currentLines = {}
+local currentTextColor = colors.lightGray
+for i = 1, height do
+    currentLines[i] = string.rep(" ", width)
+end
+
+-- Открываем канал на прием пакетов
+wirelessModem.open(MODEM_CHANNEL)
+
+-- Отрисовка зеленой рамки прямо на экране ПК
+local function drawFrame()
+    term.setTextColor(COLOR_FRAME)
+    term.setCursorPos(1, 1)
+    term.write(string.rep("=", width))
+    term.setCursorPos(1, height)
+    term.write(string.rep("=", width))
+    
+    for i = 2, height - 1 do
+        term.setCursorPos(1, i)
+        term.write("|")
+        term.setCursorPos(width, i)
+        term.write("|")
+    end
+    
+    local title = " [ REMOTE POCKET SYSTEM ] "
+    local startX = math.max(2, math.floor((width - #title) / 2))
+    term.setCursorPos(startX, 1)
+    term.write(title)
+end
+
+-- Анимация split-flap для встроенного экрана
+local function flipToLines(targetLines, textColor)
+    currentTextColor = textColor
+    
+    for step = 1, 3 do
+        term.clear()
+        drawFrame() 
+        
+        for y = 2, height - 1 do
+            local current = currentLines[y] or string.rep(" ", width)
+            local target = targetLines[y] or string.rep(" ", width)
+            local displayStr = ""
+            
+            -- Обрезаем строку под размер экрана ПК, если она шире
+            for x = 2, width - 1 do
+                local cChar = string.sub(current, x, x) or " "
+                local tChar = string.sub(target, x, x) or " "
+                
+                if cChar == tChar then
+                    displayStr = displayStr .. tChar
+                else
+                    if step == 1 then displayStr = displayStr .. "-"
+                    elseif step == 2 then displayStr = displayStr .. "_"
+                    else displayStr = displayStr .. tChar end
+                end
+            end
+            
+            term.setTextColor(currentTextColor)
+            term.setCursorPos(2, y)
+            term.write(displayStr)
+        end
+        sleep(ANIMATION_SPEED)
+    end
+    
+    currentLines = targetLines
+end
+
+-- ==================== MAIN RECEIVER LOOP ====================
+term.setBackgroundColor(COLOR_BG)
+term.clear()
+drawFrame()
+
+print("Pocket Terminal Link Active on channel " .. MODEM_CHANNEL)
+print("Waiting for Bunker Server...")
+
+while true do
+    -- Ждём беспроводной пакет от сервера
+    local event, side, channel, replyChannel, message, distance = os.pullEvent("modem_message")
+    
+    if channel == MODEM_CHANNEL and type(message) == "table" then
+        local newLines = message.screenLines
+        local textColor = message.textColor
+        
+        -- Проверяем изменения строк
+        local changed = false
+        for i = 1, height do
+            if newLines[i] ~= currentLines[i] or textColor ~= currentTextColor then
+                changed = true
+                break
+            end
+        end
+        
+        -- Если сервер прислал новые данные, запускаем анимацию на экране ПК
+        if changed then
+            flipToLines(newLines, textColor)
+        end
+    end
+end

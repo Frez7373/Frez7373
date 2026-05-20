@@ -1,0 +1,134 @@
+-- ==================== CONFIGURATION ====================
+-- ЕСЛИ НА ШАГЕ 1 ТЫ УВИДЕЛ ДРУГОЕ ИМЯ, ПРОСТО ЗАМЕНИ ЕГО ТУТ:
+local TANK_NAME = "create:fluid_tank_0" 
+
+local REFRESH_RATE = 2.0      
+local ANIMATION_SPEED = 0.05   
+
+-- Подключение монитора
+local monitor = peripheral.find("monitor")
+if not monitor then error("Monitor not found!") end
+monitor.setTextScale(1)
+local width, height = monitor.getSize()
+
+-- Подключение бака
+local tank = peripheral.wrap(TANK_NAME)
+
+-- Настройка цветов
+local termColor = term.isColor()
+local COLOR_BG = colors.black
+local COLOR_TEXT = termColor and colors.lightGray or colors.white
+local COLOR_FRAME = termColor and colors.green or colors.white
+
+local currentLines = {}
+for i = 1, height do currentLines[i] = string.rep(" ", width) end
+local daysOfWeek = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+
+-- ==================== FUNCTIONS ====================
+
+local function centerText(text, maxWidth)
+    if #text >= maxWidth then return string.sub(text, 1, maxWidth) end
+    local padLeft = math.floor((maxWidth - #text) / 2)
+    local padRight = maxWidth - #text - padLeft
+    return string.rep(" ", padLeft) .. text .. string.rep(" ", padRight)
+end
+
+local function drawFrame()
+    term.setTextColor(COLOR_FRAME)
+    monitor.setCursorPos(1, 1) monitor.write(string.rep("=", width))
+    monitor.setCursorPos(1, height) monitor.write(string.rep("=", width))
+    for i = 2, height - 1 do
+        monitor.setCursorPos(1, i) monitor.write("|")
+        monitor.setCursorPos(width, i) monitor.write("|")
+    end
+    local title = " [ BUNKER MANAGEMENT SYSTEM v3.5 ] "
+    local startX = math.max(2, math.floor((width - #title) / 2))
+    monitor.setCursorPos(startX, 1) monitor.write(title)
+end
+
+local function flipToLines(targetLines)
+    local oldTerm = term.redirect(monitor)
+    for step = 1, 3 do
+        monitor.clear()
+        drawFrame()
+        for y = 2, height - 1 do
+            local current = currentLines[y] or string.rep(" ", width)
+            local target = targetLines[y] or string.rep(" ", width)
+            local displayStr = ""
+            for x = 2, width - 1 do
+                local cChar = string.sub(current, x, x) or " "
+                local tChar = string.sub(target, x, x) or " "
+                if cChar == tChar then displayStr = displayStr .. tChar
+                else
+                    if step == 1 then displayStr = displayStr .. "-"
+                    elseif step == 2 then displayStr = displayStr .. "_"
+                    else displayStr = displayStr .. tChar end
+                end
+            end
+            monitor.setTextColor(COLOR_TEXT)
+            monitor.setCursorPos(2, y) monitor.write(displayStr)
+        end
+        sleep(ANIMATION_SPEED)
+    end
+    term.redirect(oldTerm)
+    currentLines = targetLines
+end
+
+-- ==================== MAIN LOOP ====================
+monitor.setBackgroundColor(COLOR_BG)
+monitor.clear()
+
+while true do
+    local lines = {}
+    for i = 1, height do lines[i] = string.rep(" ", width) end
+    
+    -- Время и календарь
+    local hour = math.floor(os.time())
+    local minute = math.floor((os.time() - hour) * 60)
+    local weekday = daysOfWeek[(os.day() - 1) % 7 + 1]
+    
+    lines[3] = "  TIME & CALENDAR SYNCHRONIZATION:"
+    lines[4] = string.format("  Day: %d (%s) | Time: %02d:%02d", os.day(), weekday, hour, minute)
+    lines[6] = "  REACTION CHAMBER / BOILER STATUS:"
+    
+    -- Проверяем бак ПРЯМО перед каждым чтением (на случай переподключения модема)
+    tank = peripheral.wrap(TANK_NAME)
+    
+    if tank then
+        -- Твой первоначальный рабочий метод чтения!
+        local info = nil
+        if type(tank.getFluidDetail) == "function" then info = tank.getFluidDetail() end
+        if info and info[1] then info = info[1] end -- развертка если пришел список
+        
+        local amount = info and (info.amount or info.count) or 0
+        local name = info and (info.name or info.id or info.displayName) or "WATER"
+        
+        if amount > 0 then
+            local fluidName = tostring(name):match("([^:]+)$") or tostring(name)
+            lines[7] = "  LIQUID: " .. fluidName:upper()
+            
+            local barWidth = width - 6
+            local filled = math.floor(math.min(1, amount / 16000) * barWidth)
+            lines[8] = "  [" .. string.rep("#", filled) .. string.rep(".", barWidth - filled) .. "]"
+            lines[9] = string.format("  VOLUME: %d mB", amount)
+        else
+            lines[7] = "  LIQUID: TANK EMPTY / IDLE"
+            lines[8] = "  [" .. string.rep(".", width - 6) .. "]"
+            lines[9] = "  VOLUME: 0 mB"
+        end
+    else
+        lines[7] = "  LIQUID: TANK NOT FOUND (" .. TANK_NAME .. ")"
+        lines[8] = "  [XXXXXXXXXXXXXXXXXXXX]"
+        lines[9] = "  ERROR: CHECK WIRED MODEM ON TANK"
+    end
+    
+    -- Фоновые показатели (энергосеть и радиация)
+    local currentEnergy = 98.4 + (math.random(-10, 15) / 10)
+    lines[11] = string.format("  GRID POWER SUPPLY: %.1f%% CORE ACTIVE", math.min(100, currentEnergy))
+    
+    local currentRad = 12.4 + (math.random(-8, 8) / 10)
+    lines[13] = string.format("  LIFE SUPPORT: RAD LEVEL STABLE (%.1f mcR/h)", currentRad)
+    
+    flipToLines(lines)
+    sleep(REFRESH_RATE)
+end

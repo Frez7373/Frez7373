@@ -1,0 +1,234 @@
+-- ==================== CONFIGURATION ====================
+local TANK_NAME = "create:fluid_tank_1" -- Твоё точное имя бака из сети!
+local REFRESH_RATE = 2.0                -- Частота обновления (сек)
+local ANIMATION_SPEED = 0.05            -- Скорость переворота табло
+
+-- Подключение периферии
+local tank = peripheral.wrap(TANK_NAME)
+local monitor = peripheral.find("monitor")
+
+if not monitor then
+    error("Could not find any attached monitor! Check wires.")
+end
+
+-- Настройка монитора
+monitor.setTextScale(1)
+local width, height = monitor.getSize()
+
+-- Настройка цветов
+local termColor = term.isColor()
+local COLOR_BG = colors.black
+local COLOR_TEXT = termColor and colors.lightGray or colors.white
+local COLOR_FRAME = termColor and colors.green or colors.white
+
+-- Инициализация буфера строк экрана
+local currentLines = {}
+for i = 1, height do
+    currentLines[i] = string.rep(" ", width)
+end
+
+-- Список дней недели для календаря
+local daysOfWeek = {
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
+}
+
+-- Базовые значения для симуляции
+local baseEnergy = 98.4
+local baseRad = 12.4
+
+-- ==================== FUNCTIONS ====================
+
+-- 1. Отрисовка рамки интерфейса
+local function drawFrame()
+    term.setTextColor(COLOR_FRAME)
+    
+    -- Верхняя и нижняя линии
+    monitor.setCursorPos(1, 1)
+    monitor.write(string.rep("=", width))
+    monitor.setCursorPos(1, height)
+    monitor.write(string.rep("=", width))
+    
+    -- Боковые границы
+    for i = 2, height - 1 do
+        monitor.setCursorPos(1, i)
+        monitor.write("|")
+        monitor.setCursorPos(width, i)
+        monitor.write("|")
+    end
+    
+    -- Главный заголовок
+    local title = " [ BUNKER MANAGEMENT SYSTEM v4.0 ] "
+    local startX = math.max(2, math.floor((width - #title) / 2))
+    monitor.setCursorPos(startX, 1)
+    monitor.write(title)
+end
+
+-- 2. Твой рабочий метод опроса бака
+local function fetchFluidData()
+    -- Каждый раз обновляем обертку на случай перезапуска сети
+    tank = peripheral.wrap(TANK_NAME)
+    if not tank then return nil end
+    
+    local rawData = nil
+    if type(tank.getFluidDetail) == "function" then
+        rawData = tank.getFluidDetail()
+    elseif type(tank.getFluidDetails) == "function" then
+        local details = tank.getFluidDetails()
+        rawData = details and details[1] or details
+    elseif type(tank.tanks) == "function" then
+        local t = tank.tanks()
+        rawData = t and t[1] or t
+    end
+
+    if rawData and rawData[1] and type(rawData[1]) == "table" then
+        rawData = rawData[1]
+    end
+    return rawData
+end
+
+-- 3. Анимация переворота символов (Split-Flap)
+local function flipToLines(targetLines)
+    local oldTerm = term.redirect(monitor)
+    
+    for step = 1, 3 do
+        monitor.clear()
+        drawFrame() -- Рамка рисуется стабильно внутри анимации
+        
+        for y = 2, height - 1 do
+            local current = currentLines[y] or string.rep(" ", width)
+            local target = targetLines[y] or string.rep(" ", width)
+            local displayStr = ""
+            
+            for x = 2, width - 1 do
+                local cChar = string.sub(current, x, x) or " "
+                local tChar = string.sub(target, x, x) or " "
+                
+                if cChar == tChar then
+                    displayStr = displayStr .. tChar
+                else
+                    if step == 1 then displayStr = displayStr .. "-"
+                    elseif step == 2 then displayStr = displayStr .. "_"
+                    else displayStr = displayStr .. tChar end
+                end
+            end
+            
+            monitor.setTextColor(COLOR_TEXT)
+            monitor.setCursorPos(2, y)
+            monitor.write(displayStr)
+        end
+        sleep(ANIMATION_SPEED)
+    end
+    
+    term.redirect(oldTerm)
+    currentLines = targetLines
+end
+
+-- ==================== REPORT GENERATION ====================
+local function generateBunkerReport()
+    local lines = {}
+    for i = 1, height do lines[i] = string.rep(" ", width) end
+    
+    -- Блок 1: Время и календарь
+    local hour = math.floor(os.time())
+    local minute = math.floor((os.time() - hour) * 60)
+    local weekday = daysOfWeek[(os.day() - 1) % 7 + 1]
+    
+    lines[3] = "  TIME & CALENDAR SYNCHRONIZATION:"
+    lines[4] = string.format("  Day: %d (%s) | Time: %02d:%02d", os.day(), weekday, hour, minute)
+    
+    -- Блок 2: Статус бака
+    lines[6] = "  REACTION CHAMBER / BOILER STATUS:"
+    
+    local info = fetchFluidData()
+    if tank then
+        local amount = nil
+        local name = nil
+        local capacity = 16000
+        
+        if info and type(info) == "table" then
+            amount = info.amount or info.count or info.fluidAmount
+            name = info.name or info.id or info.displayName
+            capacity = info.capacity or info.maxAmount or 16000
+        end
+        
+        if amount and amount > 0 and name then
+            local fluidName = tostring(name):match("([^:]+)$") or tostring(name)
+            lines[7] = "  LIQUID: " .. fluidName:upper()
+            
+            local barWidth = width - 6
+            if type(tank.getFluidCapacity) == "function" then
+                capacity = tank.getFluidCapacity()
+            end
+            
+            local fillRatio = math.min(1, amount / capacity)
+            local filledChars = math.floor(fillRatio * barWidth)
+            lines[8] = "  [" .. string.rep("#", filledChars) .. string.rep(".", barWidth - filledChars) .. "]"
+            lines[9] = string.format("  VOLUME: %d / %d mB", amount, capacity)
+        else
+            lines[7] = "  LIQUID: TANK EMPTY / IDLE"
+            lines[8] = "  [" .. string.rep(".", width - 6) .. "]"
+            lines[9] = "  VOLUME: 0 mB"
+        end
+    else
+        lines[7] = "  LIQUID: TANK NOT FOUND В СЕТИ"
+        lines[8] = "  [XXXXXXXXXXXXXXXXXXXX]"
+        lines[9] = "  ВНИМАНИЕ: ПРОВЕРЬТЕ ИМЯ И МОДЕМЫ"
+    end
+    
+    -- Блок 3: Энергосеть
+    local currentEnergy = baseEnergy + (math.random(-10, 15) / 10)
+    if currentEnergy > 100 then currentEnergy = 100 end
+    lines[11] = string.format("  GRID POWER SUPPLY: %.1f%% CORE ACTIVE", currentEnergy)
+    
+    -- Блок 4: Безопасность периметра (Исправленная логика без булевых ошибок)
+    local secureStatus = true
+    local sides = {"top", "bottom", "left", "right", "front", "back"}
+    for _, side in ipairs(sides) do
+        if side ~= "right" and side ~= "bottom" then -- Пропускаем стороны с твоими моделями сети
+            if rs.getInput(side) == true then        -- Четко проверяем на true/false
+                secureStatus = false 
+                break 
+            end
+        end
+    end
+    
+    if secureStatus then
+        lines[13] = "  SECURITY: PERIMETER SECURED [OK]"
+    else
+        lines[13] = "  SECURITY: !! WARNING / MOTION DETECTED !!"
+    end
+    
+    -- Блок 5: Радиация
+    local currentRad = baseRad + (math.random(-8, 8) / 10)
+    lines[15] = string.format("  LIFE SUPPORT: RAD LEVEL STABLE (%.1f mcR/h)", currentRad)
+    
+    return lines
+end
+
+-- ==================== MAIN RUNTIME LOOP ====================
+print("Bunker Control System v4.0 is starting...")
+monitor.setBackgroundColor(COLOR_BG)
+monitor.clear()
+
+-- Самый первый запуск отрисовки
+local old = term.redirect(monitor)
+drawFrame()
+term.redirect(old)
+
+while true do
+    local newLines = generateBunkerReport()
+    
+    local changed = false
+    for i = 1, height do
+        if newLines[i] ~= currentLines[i] then
+            changed = true
+            break
+        end
+    end
+    
+    if changed then
+        flipToLines(newLines)
+    end
+    
+    sleep(REFRESH_RATE)
+end

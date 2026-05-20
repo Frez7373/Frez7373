@@ -1,0 +1,266 @@
+-- ==================== CONFIGURATION ====================
+local TANK_NAME = "create:fluid_tank_1" -- Твой рабочий бак из сети
+local REFRESH_RATE = 2.0                -- Частота обновления (сек)
+local ANIMATION_SPEED = 0.05            -- Скорость переворота табло
+
+-- СТОРОНЫ ДЛЯ ДАТЧИКОВ БЕЗОПАСНОСТИ:
+local SIDE_ALARM = "left"               -- Сторона для тревоги (Красный цвет)
+local SIDE_DOOR = "front"               -- Сторона для двери (Желтый цвет)
+
+-- Подключение монитора
+local monitor = peripheral.find("monitor")
+if not monitor then
+    error("Could not find any attached monitor! Check wires.")
+end
+
+-- Настройка монитора
+monitor.setTextScale(1)
+local width, height = monitor.getSize()
+
+-- Настройка фиксированных цветов
+local termColor = term.isColor()
+local COLOR_BG = colors.black
+local COLOR_FRAME = termColor and colors.green or colors.white
+
+-- Буфер строк экрана
+local currentLines = {}
+for i = 1, height do
+    currentLines[i] = string.rep(" ", width)
+end
+
+local daysOfWeek = {
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"
+}
+
+-- Базовые значения для симуляции
+local baseEnergy = 98.4
+local baseRad = 12.4
+
+-- Глобальная переменная для передачи текущего цвета текста в анимацию
+local currentTextColor = termColor and colors.lightGray or colors.white
+
+-- ==================== 1. LOW LEVEL FUNCTIONS ====================
+
+-- Отрисовка рамки интерфейса (Всегда ЗЕЛЕНАЯ)
+local function drawFrame()
+    term.setTextColor(COLOR_FRAME)
+    
+    -- Верхняя и нижняя линии
+    monitor.setCursorPos(1, 1)
+    monitor.write(string.rep("=", width))
+    monitor.setCursorPos(1, height)
+    monitor.write(string.rep("=", width))
+    
+    -- Боковые границы
+    for i = 2, height - 1 do
+        monitor.setCursorPos(1, i)
+        monitor.write("|")
+        monitor.setCursorPos(width, i)
+        monitor.write("|")
+    end
+    
+    -- Главный заголовок (Версия всегда ЗЕЛЕНАЯ)
+    local title = " [ BUNKER MANAGEMENT SYSTEM v5.3 ] "
+    local startX = math.max(2, math.floor((width - #title) / 2))
+    monitor.setCursorPos(startX, 1)
+    monitor.write(title)
+end
+
+-- Центрирование текста
+local function centerText(text, maxWidth)
+    if #text >= maxWidth then return string.sub(text, 1, maxWidth) end
+    local padLeft = math.floor((maxWidth - #text) / 2)
+    local padRight = maxWidth - #text - padLeft
+    return string.rep(" ", padLeft) .. text .. string.rep(" ", padRight)
+end
+
+-- ==================== 2. DATA UTILITIES ====================
+
+-- Твой оригинальный рабочий метод опроса бака
+local function fetchFluidData()
+    local tank = peripheral.wrap(TANK_NAME)
+    if not tank then return nil end
+    
+    local rawData = nil
+    if type(tank.getFluidDetail) == "function" then
+        rawData = tank.getFluidDetail()
+    elseif type(tank.getFluidDetails) == "function" then
+        local details = tank.getFluidDetails()
+        rawData = details and details[1] or details
+    elseif type(tank.tanks) == "function" then
+        local t = tank.tanks()
+        rawData = t and t[1] or t
+    end
+
+    if rawData and rawData[1] and type(rawData[1]) == "table" then
+        rawData = rawData[1]
+    end
+    return rawData
+end
+
+-- Анимация механического переворота
+local function flipToLines(targetLines)
+    local oldTerm = term.redirect(monitor)
+    
+    for step = 1, 3 do
+        monitor.clear()
+        drawFrame() -- Рамка рисуется зеленой
+        
+        for y = 2, height - 1 do
+            local current = currentLines[y] or string.rep(" ", width)
+            local target = targetLines[y] or string.rep(" ", width)
+            local displayStr = ""
+            
+            for x = 2, width - 1 do
+                local cChar = string.sub(current, x, x) or " "
+                local tChar = string.sub(target, x, x) or " "
+                
+                if cChar == tChar then
+                    displayStr = displayStr .. tChar
+                else
+                    if step == 1 then displayStr = displayStr .. "-"
+                    elseif step == 2 then displayStr = displayStr .. "_"
+                    else displayStr = displayStr .. tChar end
+                end
+            end
+            
+            -- Применяем динамический цвет текста для содержимого экрана
+            monitor.setTextColor(currentTextColor)
+            monitor.setCursorPos(2, y)
+            monitor.write(displayStr)
+        end
+        sleep(ANIMATION_SPEED)
+    end
+    
+    term.redirect(oldTerm)
+    currentLines = targetLines
+end
+
+-- ==================== 3. REPORT GENERATOR ====================
+
+local function generateBunkerReport()
+    local lines = {}
+    for i = 1, height do lines[i] = string.rep(" ", width) end
+    
+    -- Опрос физических сигналов редстоуна для смены режимов системы
+    local isAlarmActive = rs.getInput(SIDE_ALARM) -- Сигнал тревоги слева
+    local isDoorOpen = rs.getInput(SIDE_DOOR)   -- Сигнал двери спереди
+    
+    -- Динамическая смена цвета текста в зависимости от приоритета угроз
+    if isAlarmActive then
+        currentTextColor = termColor and colors.red or colors.white
+    elseif isDoorOpen then
+        currentTextColor = termColor and colors.yellow or colors.white
+    else
+        currentTextColor = termColor and colors.lightGray or colors.white
+    end
+    
+    -- Блок 1: Время и календарь
+    local gameTime = os.time() 
+    local hour = math.floor(gameTime)
+    local minute = math.floor((gameTime - hour) * 60)
+    local weekday = daysOfWeek[(os.day() - 1) % 7 + 1]
+    
+    lines[3] = "  TIME & CALENDAR SYNCHRONIZATION:"
+    lines[4] = string.format("  Day: %d (%s) | Time: %02d:%02d", os.day(), weekday, hour, minute)
+    
+    -- Блок 2: Статус бака
+    lines[6] = "  REACTION CHAMBER / BOILER STATUS:"
+    
+    local info = fetchFluidData()
+    local tankCheck = peripheral.wrap(TANK_NAME)
+    local currentAmount = 0
+    
+    if tankCheck then
+        local amount = nil
+        local name = nil
+        local capacity = 145000
+        
+        if info and type(info) == "table" then
+            amount = info.amount or info.count or info.fluidAmount
+            name = info.name or info.id or info.displayName
+            capacity = info.capacity or info.maxAmount or 145000
+        end
+        
+        if amount and amount > 0 and name then
+            currentAmount = amount 
+            local fluidName = tostring(name):match("([^:]+)$") or tostring(name)
+            lines[7] = "  LIQUID: " .. fluidName:upper()
+            
+            local barWidth = width - 6
+            if type(tankCheck.getFluidCapacity) == "function" then
+                capacity = tankCheck.getFluidCapacity()
+            end
+            
+            local fillRatio = math.min(1, amount / capacity)
+            local filledChars = math.floor(fillRatio * barWidth)
+            lines[8] = "  [" .. string.rep("#", filledChars) .. string.rep(".", barWidth - filledChars) .. "]"
+            lines[9] = string.format("  VOLUME: %d / %d mB", amount, capacity)
+        else
+            lines[7] = "  LIQUID: TANK EMPTY / IDLE"
+            lines[8] = "  [" .. string.rep(".", width - 6) .. "]"
+            lines[9] = "  VOLUME: 0 mB"
+        end
+    else
+        lines[7] = "  LIQUID: TANK NOT FOUND"
+        lines[8] = "  [XXXXXXXXXXXXXXXXXXXX]"
+        lines[9] = "  ERROR: CHECK WIRE MODEM ON TANK"
+    end
+    
+    -- Логика таймера и уровня жидкости (сигнал вверх на "top")
+    local lowFluidTrigger = (not tankCheck or currentAmount < 10000)
+    local timeTrigger = (gameTime >= 2.0 and gameTime <= 4.5)
+    
+    if lowFluidTrigger or timeTrigger then
+        rs.setOutput("top", true)
+    else
+        rs.setOutput("top", false)
+    end
+    
+    -- Блок 3: Энергосеть
+    local currentEnergy = baseEnergy + (math.random(-10, 15) / 10)
+    if currentEnergy > 100 then currentEnergy = 100 end
+    lines[11] = string.format("  GRID POWER SUPPLY: %.1f%% CORE ACTIVE", currentEnergy)
+    
+    -- Блок 4: Безопасность периметра и статус дверей
+    if isAlarmActive then
+        lines[13] = "  SECURITY: !!! BREAK-IN !!!"
+    elseif isDoorOpen then
+        lines[13] = "  SECURITY: [!] DOOR OPEN [!]"
+    else
+        lines[13] = "  SECURITY: PERIMETER SECURED [OK]"
+    end
+    
+    -- Блок 5: Радиация
+    local currentRad = baseRad + (math.random(-8, 8) / 10)
+    lines[15] = string.format("  LIFE SUPPORT: RAD LEVEL STABLE (%.1f mcR/h)", currentRad)
+    
+    return lines
+end
+
+-- ==================== MAIN RUNTIME LOOP ====================
+print("Bunker System OS v5.3 is running... Press Ctrl+T to stop.")
+monitor.setBackgroundColor(COLOR_BG)
+monitor.clear()
+
+local old = term.redirect(monitor)
+drawFrame()
+term.redirect(old)
+
+while true do
+    local newLines = generateBunkerReport()
+    
+    local changed = false
+    for i = 1, height do
+        if newLines[i] ~= currentLines[i] then
+            changed = true
+            break
+        end
+    end
+    
+    if changed then
+        flipToLines(newLines)
+    end
+    
+    sleep(REFRESH_RATE)
+end

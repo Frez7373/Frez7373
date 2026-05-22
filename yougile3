@@ -1,0 +1,259 @@
+-- Configuration
+local MODEM_SIDE = "top" -- Change to "back", "left", "right" if needed
+local REFRESH_RATE = 5   -- Auto-refresh timing in seconds
+
+-- Connect to Rednet
+if peripheral.isPresent(MODEM_SIDE) and peripheral.getType(MODEM_SIDE) == "modem" then
+    rednet.open(MODEM_SIDE)
+else
+    term.setTextColor(colors.red)
+    print("Error: Modem not found on side: " .. MODEM_SIDE)
+    term.setTextColor(colors.white)
+    return
+end
+
+local SERVER_ID = nil
+local BOARD_DATA = {
+    ["1. TODO"] = {},
+    ["2. IN PROGRESS"] = {},
+    ["3. DONE"] = {}
+}
+
+-- Network Handshake
+local function findServer()
+    term.clear()
+    term.setCursorPos(1,1)
+    term.setTextColor(colors.cyan)
+    print("Connecting to MineGile Cloud Server...")
+    term.setTextColor(colors.white)
+    
+    rednet.broadcast({action = "ping_yougile"}, "yougile_protocol")
+    local id, response = rednet.receive("yougile_protocol", 2.0)
+    
+    if response and response.reply == "pong_yougile" then
+        SERVER_ID = id
+        term.setTextColor(colors.lime)
+        print("Success! Synced with Server Host ID: " .. id)
+        term.setTextColor(colors.white)
+        sleep(1)
+        return true
+    end
+    
+    term.setTextColor(colors.yellow)
+    print("Warning: Server offline. Running in Local Sandbox Mode.")
+    term.setTextColor(colors.white)
+    sleep(1.5)
+    return false
+end
+
+-- Sync Data
+local function syncBoard()
+    if not SERVER_ID then return end
+    rednet.send(SERVER_ID, {action = "get_board"}, "yougile_protocol")
+    local id, response = rednet.receive("yougile_protocol", 1.0)
+    if response and response.success then
+        BOARD_DATA = response.board
+    end
+end
+
+-- Network Request Helper
+local function sendAction(payload)
+    if SERVER_ID then
+        rednet.send(SERVER_ID, payload, "yougile_protocol")
+        syncBoard()
+    end
+end
+
+-- Helper for colorful Priority text
+local function getPriorityColor(priority)
+    if priority == "HIGH" then return colors.red
+    elseif priority == "MED" then return colors.orange
+    else return colors.lightGray end
+end
+
+-- Drawing the beautiful Kanban Workspace UI
+local function drawBoard()
+    term.clear()
+    local w, h = term.getSize()
+    
+    -- Header Bar
+    term.setBackgroundColor(colors.gray)
+    term.setTextColor(colors.yellow)
+    term.setCursorPos(1, 1)
+    term.clearLine()
+    write("  YOUGILE WORKSPACE  ")
+    term.setTextColor(colors.lightGray)
+    write(SERVER_ID and "[CLOUD SYNCED]" or "[OFFLINE MODE]")
+    
+    -- Subheader column references
+    term.setBackgroundColor(colors.black)
+    term.setCursorPos(1, 3)
+    
+    local columns = {"1. TODO", "2. IN PROGRESS", "3. DONE"}
+    local colColors = {colors.lightBlue, colors.orange, colors.lime}
+    
+    for i, colName in ipairs(columns) do
+        term.setTextColor(colColors[i])
+        print("=== " .. colName .. " ===")
+        
+        local tasks = BOARD_DATA[colName] or {}
+        if #tasks == 0 then
+            term.setTextColor(colors.gray)
+            print("  (Empty column)")
+        else
+            for idx, task in ipairs(tasks) do
+                -- Render Index and Title
+                term.setTextColor(colors.white)
+                write("  " .. idx .. ". " .. task.title)
+                
+                -- Render Priority Badge
+                term.setTextColor(getPriorityColor(task.priority))
+                write(" [" .. (task.priority or "LOW") .. "]")
+                
+                -- Render Assignee if any
+                if task.assignee and task.assignee ~= "" then
+                    term.setTextColor(colors.pink)
+                    write(" @" .. task.assignee)
+                end
+                print()
+                
+                -- Render Short Description below title
+                term.setTextColor(colors.lightGray)
+                print("     " .. task.desc)
+            end
+        end
+        print()
+    end
+    
+    -- Bottom control system bar menu
+    term.setCursorPos(1, h - 1)
+    term.setBackgroundColor(colors.cyan)
+    term.setTextColor(colors.black)
+    term.clearLine()
+    write(" [A] Add Task    | [M] Move Status | [D] Delete Task")
+    
+    term.setCursorPos(1, h)
+    term.setBackgroundColor(colors.blue)
+    term.setTextColor(colors.white)
+    term.clearLine()
+    write(" [R] Force Sync  | [Q] Safe Quit Workspace Application")
+    
+    -- Reset system drawing values back to default baseline configurations
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+end
+
+-- Main Startup Routine
+findServer()
+
+-- Event/Loop Processing Matrix
+while true do
+    syncBoard()
+    drawBoard()
+    
+    -- Set a timer to allow auto-refresh cycles if user doesn't hit keys
+    local timerID = os.startTimer(REFRESH_RATE)
+    local event, p1, p2 = os.pullEvent()
+    
+    if event == "key" then
+        os.cancelTimer(timerID) -- stop timer if input captured
+        
+        if p1 == keys.q then
+            term.clear()
+            term.setCursorPos(1,1)
+            break
+            
+        elseif p1 == keys.r then
+            syncBoard()
+            
+        elseif p1 == keys.a then
+            term.clear()
+            term.setTextColor(colors.yellow)
+            print("=== CREATE NEW AGILITY CARD ===")
+            term.setTextColor(colors.white)
+            print("Select Destination Column:\n1. TODO\n2. IN PROGRESS\n3. DONE")
+            write("Choice (1-3): ")
+            local num = read()
+            local col = num == "2" and "2. IN PROGRESS" or (num == "3" and "3. DONE" or "1. TODO")
+            
+            write("Task Title: ")
+            local title = read()
+            write("Short Description: ")
+            local desc = read()
+            write("Assign to Player (Optional): ")
+            local worker = read()
+            write("Priority Level (1=LOW, 2=MED, 3=HIGH): ")
+            local pNum = read()
+            local prio = pNum == "2" and "MED" or (pNum == "3" and "HIGH" or "LOW")
+            
+            if title ~= "" then
+                if SERVER_ID then
+                    sendAction({action = "add_task", column = col, title = title, desc = desc, assignee = worker, priority = prio})
+                else
+                    table.insert(BOARD_DATA[col], {title = title, desc = desc, assignee = worker, priority = prio})
+                end
+            end
+            
+        elseif p1 == keys.m then
+            term.clear()
+            term.setTextColor(colors.orange)
+            print("=== SHIFT CARD STATUS COLUMN ===")
+            term.setTextColor(colors.white)
+            write("Select Source Column Index (1-3): ")
+            local fromNum = read()
+            local colKeys = {"1. TODO", "2. IN PROGRESS", "3. DONE"}
+            local fromCol = colKeys[tonumber(fromNum)]
+            
+            if fromCol and BOARD_DATA[fromCol] and #BOARD_DATA[fromCol] > 0 then
+                write("Enter Card List Index Number: ")
+                local tIdx = tonumber(read())
+                
+                if tIdx and BOARD_DATA[fromCol][tIdx] then
+                    write("Select Target Destination Column Index (1-3): ")
+                    local toNum = read()
+                    local toCol = colKeys[tonumber(toNum)]
+                    
+                    if toCol then
+                        if SERVER_ID then
+                            sendAction({action = "move_task", fromCol = fromCol, toCol = toCol, index = tIdx})
+                        else
+                            local card = table.remove(BOARD_DATA[fromCol], tIdx)
+                            table.insert(BOARD_DATA[toCol], card)
+                        end
+                    end
+                end
+            end
+            
+        elseif p1 == keys.d then
+            term.clear()
+            term.setTextColor(colors.red)
+            print("=== DELETE TASK PERMANENTLY ===")
+            term.setTextColor(colors.white)
+            write("Select Column Index containing the task (1-3): ")
+            local targetColNum = read()
+            local colKeys = {"1. TODO", "2. IN PROGRESS", "3. DONE"}
+            local targetCol = colKeys[tonumber(targetColNum)]
+            
+            if targetCol and BOARD_DATA[targetCol] and #BOARD_DATA[targetCol] > 0 then
+                write("Enter Card List Index Number to delete: ")
+                local deleteIdx = tonumber(read())
+                
+                if deleteIdx and BOARD_DATA[targetCol][deleteIdx] then
+                    write("Are you sure? (y/n): ")
+                    local confirm = read():lower()
+                    if confirm == "y" then
+                        if SERVER_ID then
+                            sendAction({action = "delete_task", column = targetCol, index = deleteIdx})
+                        else
+                            table.remove(BOARD_DATA[targetCol], deleteIdx)
+                        end
+                    end
+                end
+            end
+        end
+        
+    elseif event == "timer" and p1 == timerID then
+        -- This forces background database sync cleanups when system stays idle
+        syncBoard()
+    end
+end

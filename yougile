@@ -1,0 +1,157 @@
+local component = require("component")
+local event = require("event")
+local term = require("term")
+local serialization = require("serialization")
+
+if not component.isAvailable("modem") then
+  io.stderr:write("Error: A Network Card (Modem) component is required!\n")
+  return
+end
+
+local modem = component.modem
+local PORT = 5555
+modem.open(PORT)
+
+-- Connection Configuration
+local SERVER_ADDRESS = nil -- Will capture server UUID upon successful handshake
+local BOARD_DATA = {
+  ["1. TODO"] = {},
+  ["2. IN PROGRESS"] = {},
+  ["3. DONE"] = {}
+}
+
+-- Discover the MineGile server over the local network
+local function findServer()
+  print("Connecting to MineGile Server...")
+  modem.broadcast(PORT, serialization.serialize({action = "ping_yougile"}))
+  local _, _, from, port, _, msg = event.pull(2.0, "modem_message")
+  if msg then
+    local data = serialization.unserialize(msg)
+    if data and data.reply == "pong_yougile" then
+      SERVER_ADDRESS = from
+      print("Connected successfully to server: " .. from:sub(1,8))
+      os.sleep(1)
+      return true
+    end
+  end
+  print("Server not found. Operating in Offline Mode.")
+  os.sleep(1.5)
+  return false
+end
+
+-- Sync the local board view with the Server
+local function syncBoard()
+  if not SERVER_ADDRESS then return end
+  modem.send(SERVER_ADDRESS, PORT, serialization.serialize({action = "get_board"}))
+  local _, _, _, _, _, msg = event.pull(1.5, "modem_message")
+  if msg then
+    local data = serialization.unserialize(msg)
+    if data and data.success then
+      BOARD_DATA = data.board
+    end
+  end
+end
+
+-- Post a brand new task item to the server repository
+local function addTask(column, title, desc)
+  if SERVER_ADDRESS then
+    local payload = {action = "add_task", column = column, title = title, desc = desc}
+    modem.send(SERVER_ADDRESS, PORT, serialization.serialize(payload))
+    syncBoard()
+  else
+    table.insert(BOARD_DATA[column], {title = title, desc = desc})
+  end
+end
+
+-- Change task status / move task card to another column
+local function moveTask(fromCol, toCol, index)
+  if SERVER_ADDRESS then
+    local payload = {action = "move_task", fromCol = fromCol, toCol = toCol, index = index}
+    modem.send(SERVER_ADDRESS, PORT, serialization.serialize(payload))
+    syncBoard()
+  else
+    local task = table.remove(BOARD_DATA[fromCol], index)
+    if task then table.insert(BOARD_DATA[toCol], task) end
+  end
+end
+
+-- Render the Agile Kanban layout on screen
+local function drawBoard()
+  term.clear()
+  local w, h = component.gpu.getResolution()
+  
+  print("=== M I N E G I L E === (Yougile Workspace for OpenComputers)")
+  print(string.rep("-", w))
+  
+  local colKeys = {"1. TODO", "2. IN PROGRESS", "3. DONE"}
+  
+  for _, colName in ipairs(colKeys) do
+    print("[" .. colName .. "]")
+    local tasks = BOARD_DATA[colName] or {}
+    if #tasks == 0 then
+      print("  (No tasks active)")
+    else
+      for idx, task in ipairs(tasks) do
+        print("  " .. idx .. ". " .. task.title .. " — " .. task.desc)
+      end
+    end
+    print()
+  end
+  
+  print(string.rep("=", w))
+  print("[A] Add Task | [M] Move Card (Change Status) | [R] Refresh Board | [Q] Quit")
+end
+
+-- Main Application Lifecycle Loop
+findServer()
+while true do
+  syncBoard()
+  drawBoard()
+  
+  local _, _, char, _ = event.pull("keydown")
+  
+  if char == string.byte("q") then
+    term.clear()
+    break
+  elseif char == string.byte("r") then
+    syncBoard()
+  elseif char == string.byte("a") then
+    term.clear()
+    print("=== CREATE NEW TASK ===")
+    print("Select Column Destination:")
+    print("1. TODO\n2. IN PROGRESS\n3. DONE")
+    io.write("Enter Column Index (1-3): ")
+    local num = io.read()
+    local col = num == "2" and "2. IN PROGRESS" or (num == "3" and "3. DONE" or "1. TODO")
+    
+    io.write("Task Title: ")
+    local title = io.read()
+    io.write("Task Description: ")
+    local desc = io.read()
+    
+    if title ~= "" then addTask(col, title, desc) end
+    
+  elseif char == string.byte("m") then
+    term.clear()
+    print("=== MOVE TASK CARD ===")
+    io.write("Source column index (1-3): ")
+    local fromNum = io.read()
+    local colKeys = {"1. TODO", "2. IN PROGRESS", "3. DONE"}
+    local fromCol = colKeys[tonumber(fromNum)]
+    
+    if fromCol and BOARD_DATA[fromCol] and #BOARD_DATA[fromCol] > 0 then
+      io.write("Enter Task Number from that column: ")
+      local tIdx = tonumber(io.read())
+      
+      if tIdx and BOARD_DATA[fromCol][tIdx] then
+        io.write("Target column index (1-3): ")
+        local toNum = io.read()
+        local toCol = colKeys[tonumber(toNum)]
+        
+        if toCol then
+          moveTask(fromCol, toCol, tIdx)
+        end
+      end
+    end
+  end
+end

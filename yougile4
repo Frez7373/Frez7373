@@ -1,0 +1,225 @@
+-- Configuration
+local MODEM_SIDE = "top" -- Side where your modem is placed
+local PORT_CHANNEL = 5555
+local FILE_DB = "tasks.txt" -- The file where all tasks will be saved inside your cloud
+
+-- Open Rednet connection
+if peripheral.isPresent(MODEM_SIDE) and peripheral.getType(MODEM_SIDE) == "modem" then
+    rednet.open(MODEM_SIDE)
+else
+    print("Error: Modem not found on side: " .. MODEM_SIDE)
+    return
+end
+
+-- Credentials tracking (Change these to your own cloud credentials)
+print("=== MineGile Login ===")
+write("Username: ")
+local username = read()
+write("Password: ")
+local password = read("*")
+
+local BOARD_DATA = {
+    ["1. TODO"] = {},
+    ["2. IN PROGRESS"] = {},
+    ["3. DONE"] = {}
+}
+
+-- Look for your cloud system servers
+local function findServers()
+    local ids = { rednet.lookup("cloud_disk") }
+    if #ids == 1 and type(ids[1]) == "number" then return ids end
+    if #ids == 0 or ids[1] == nil then return {} end
+    return ids
+end
+
+-- Unified request wrapper matching your server layout framework
+local function sendRequest(payload)
+    payload.username = username
+    payload.password = password
+    local serverIDs = findServers()
+    
+    if #serverIDs == 0 then return nil end
+    
+    for _, sID in ipairs(serverIDs) do
+        rednet.send(sID, payload, "cloud_disk")
+        local id, response = rednet.receive("cloud_disk", 1.5)
+        if response then return response end
+    end
+    return nil
+end
+
+-- Hydrate and sync the board by downloading tasks.txt from your server
+local function syncBoard()
+    local res = sendRequest({action = "download", filename = FILE_DB})
+    if res and res.success then
+        local data = textutils.unserialize(res.content)
+        if data then BOARD_DATA = data end
+    else
+        -- If the file doesn't exist yet on the server, create a blank baseline schema
+        local blankContent = textutils.serialize(BOARD_DATA)
+        sendRequest({action = "upload", filename = FILE_DB, content = blankContent})
+    end
+end
+
+-- Push the current state of variables up into your cloud server data system
+local function saveBoard()
+    local content = textutils.serialize(BOARD_DATA)
+    sendRequest({action = "upload", filename = FILE_DB, content = content})
+end
+
+local function getPriorityColor(priority)
+    if priority == "HIGH" then return colors.red
+    elseif priority == "MED" then return colors.orange
+    else return colors.lightGray end
+end
+
+-- Screen Drawing Engine
+local function drawBoard()
+    term.clear()
+    local w, h = term.getSize()
+    
+    term.setBackgroundColor(colors.gray)
+    term.setTextColor(colors.yellow)
+    term.setCursorPos(1, 1)
+    term.clearLine()
+    write("  YOUGILE WORKSPACE  |  User: " .. username)
+    
+    term.setBackgroundColor(colors.black)
+    term.setCursorPos(1, 3)
+    
+    local columns = {"1. TODO", "2. IN PROGRESS", "3. DONE"}
+    local colColors = {colors.lightBlue, colors.orange, colors.lime}
+    
+    for i, colName in ipairs(columns) do
+        term.setTextColor(colColors[i])
+        print("=== " .. colName .. " ===")
+        
+        local tasks = BOARD_DATA[colName] or {}
+        if #tasks == 0 then
+            term.setTextColor(colors.gray)
+            print("  (Empty column)")
+        else
+            for idx, task in ipairs(tasks) do
+                term.setTextColor(colors.white)
+                write("  " .. idx .. ". " .. task.title)
+                
+                term.setTextColor(getPriorityColor(task.priority))
+                write(" [" .. (task.priority or "LOW") .. "]")
+                
+                if task.assignee and task.assignee ~= "" then
+                    term.setTextColor(colors.pink)
+                    write(" @" .. task.assignee)
+                end
+                print()
+                
+                term.setTextColor(colors.lightGray)
+                print("     " .. task.desc)
+            end
+        end
+        print()
+    end
+    
+    term.setCursorPos(1, h - 1)
+    term.setBackgroundColor(colors.cyan)
+    term.setTextColor(colors.black)
+    term.clearLine()
+    write(" [A] Add Task    | [M] Move Status | [D] Delete Task")
+    
+    term.setCursorPos(1, h)
+    term.setBackgroundColor(colors.blue)
+    term.setTextColor(colors.white)
+    term.clearLine()
+    write(" [R] Force Sync  | [Q] Safe Quit Workspace Application")
+    
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+end
+
+-- Try initial data handshake sync
+syncBoard()
+
+while true do
+    drawBoard()
+    local event, key = os.pullEvent("key")
+    
+    if key == keys.q then
+        term.clear()
+        term.setCursorPos(1,1)
+        break
+        
+    elseif key == keys.r then
+        syncBoard()
+        
+    elseif key == keys.a then
+        term.clear()
+        print("=== CREATE NEW CARD ===")
+        print("Select Column:\n1. TODO\n2. IN PROGRESS\n3. DONE")
+        write("Choice (1-3): ")
+        local num = read()
+        local col = num == "2" and "2. IN PROGRESS" or (num == "3" and "3. DONE" or "1. TODO")
+        
+        write("Task Title: ")
+        local title = read()
+        write("Description: ")
+        local desc = read()
+        write("Assignee: ")
+        local worker = read()
+        print("Priority (1=LOW, 2=MED, 3=HIGH): ")
+        local pNum = read()
+        local prio = pNum == "2" and "MED" or (pNum == "3" and "HIGH" or "LOW")
+        
+        if title ~= "" then
+            table.insert(BOARD_DATA[col], {title = title, desc = desc, assignee = worker, priority = prio})
+            saveBoard()
+            syncBoard()
+        end
+        
+    elseif key == keys.m then
+        term.clear()
+        print("=== MOVE CARD STATUS ===")
+        write("Source Column (1-3): ")
+        local fromNum = read()
+        local colKeys = {"1. TODO", "2. IN PROGRESS", "3. DONE"}
+        local fromCol = colKeys[tonumber(fromNum)]
+        
+        if fromCol and BOARD_DATA[fromCol] and #BOARD_DATA[fromCol] > 0 then
+            write("Enter Card Number: ")
+            local tIdx = tonumber(read())
+            
+            if tIdx and BOARD_DATA[fromCol][tIdx] then
+                write("Target Column (1-3): ")
+                local toNum = read()
+                local toCol = colKeys[tonumber(toNum)]
+                
+                if toCol then
+                    local card = table.remove(BOARD_DATA[fromCol], tIdx)
+                    table.insert(BOARD_DATA[toCol], card)
+                    saveBoard()
+                    syncBoard()
+                end
+            end
+        end
+        
+    elseif key == keys.d then
+        term.clear()
+        print("=== DELETE TASK ===")
+        write("Column Index (1-3): ")
+        local targetColNum = read()
+        local colKeys = {"1. TODO", "2. IN PROGRESS", "3. DONE"}
+        local targetCol = colKeys[tonumber(targetColNum)]
+        
+        if targetCol and BOARD_DATA[targetCol] and #BOARD_DATA[targetCol] > 0 then
+            write("Enter Task Number to remove: ")
+            local deleteIdx = tonumber(read())
+            
+            if deleteIdx and BOARD_DATA[targetCol][deleteIdx] then
+                write("Confirm delete? (y/n): ")
+                if read():lower() == "y" then
+                    table.remove(BOARD_DATA[targetCol], deleteIdx)
+                    saveBoard()
+                    syncBoard()
+                end
+            end
+        end
+    end
+end

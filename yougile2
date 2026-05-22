@@ -1,0 +1,168 @@
+-- Configuration
+local MODEM_SIDE = "top" -- Change to "back", "left", etc., if your modem is placed elsewhere
+local PORT_CHANNEL = 5555
+
+-- Open the peripheral network connection
+if peripheral.isPresent(MODEM_SIDE) and peripheral.getType(MODEM_SIDE) == "modem" then
+    rednet.open(MODEM_SIDE)
+else
+    print("Error: Modem not found on side: " .. MODEM_SIDE)
+    print("Please check your block setup.")
+    return
+end
+
+local SERVER_ID = nil
+local BOARD_DATA = {
+    ["1. TODO"] = {},
+    ["2. IN PROGRESS"] = {},
+    ["3. DONE"] = {}
+}
+
+-- Broadcast to locate an online task tracker server
+local function findServer()
+    term.clear()
+    term.setCursorPos(1,1)
+    print("Connecting to MineGile Server...")
+    
+    rednet.broadcast({action = "ping_yougile"}, "yougile_protocol")
+    local id, response = rednet.receive("yougile_protocol", 2.0)
+    
+    if response and response.reply == "pong_yougile" then
+        SERVER_ID = id
+        print("Connected successfully to Server ID: " .. id)
+        sleep(1)
+        return true
+    end
+    
+    print("Server not found. Operating in Offline Mode.")
+    sleep(1.5)
+    return false
+end
+
+-- Fetch the latest board data array from the server
+local function syncBoard()
+    if not SERVER_ID then return end
+    rednet.send(SERVER_ID, {action = "get_board"}, "yougile_protocol")
+    local id, response = rednet.receive("yougile_protocol", 1.5)
+    if response and response.success then
+        BOARD_DATA = response.board
+    end
+end
+
+-- Push a new project assignment up to the server
+local function addTask(column, title, desc)
+    if SERVER_ID then
+        local payload = {action = "add_task", column = column, title = title, desc = desc}
+        rednet.send(SERVER_ID, payload, "yougile_protocol")
+        syncBoard()
+    else
+        table.insert(BOARD_DATA[column], {title = title, desc = desc})
+    end
+end
+
+-- Drag and drop a task into a different progress status state
+local function moveTask(fromCol, toCol, index)
+    if SERVER_ID then
+        local payload = {action = "move_task", fromCol = fromCol, toCol = toCol, index = index}
+        rednet.send(SERVER_ID, payload, "yougile_protocol")
+        syncBoard()
+    else
+        local task = table.remove(BOARD_DATA[fromCol], index)
+        if task then table.insert(BOARD_DATA[toCol], task) end
+    end
+end
+
+-- Render the clean visual dashboard
+local function drawBoard()
+    term.clear()
+    local w, h = term.getSize()
+    
+    term.setTextColor(colors.yellow)
+    print("=== M I N E G I L E === (Yougile Workspace for CC:Tweaked)")
+    term.setTextColor(colors.white)
+    print(string.rep("-", w))
+    
+    local colKeys = {"1. TODO", "2. IN PROGRESS", "3. DONE"}
+    
+    for _, colName in ipairs(colKeys) do
+        term.setTextColor(colors.lime)
+        print("[" .. colName .. "]")
+        term.setTextColor(colors.white)
+        
+        local tasks = BOARD_DATA[colName] or {}
+        if #tasks == 0 then
+            term.setTextColor(colors.lightGray)
+            print("  (No tasks active)")
+            term.setTextColor(colors.white)
+        else
+            for idx, task in ipairs(tasks) do
+                print("  " .. idx .. ". " .. task.title .. " -> " .. task.desc)
+            end
+        end
+        print()
+    end
+    
+    term.setCursorPos(1, h)
+    term.setBackgroundColor(colors.gray)
+    term.setTextColor(colors.white)
+    term.clearLine()
+    write(" [A] Add Task | [M] Move Card | [R] Refresh | [Q] Quit")
+    term.setBackgroundColor(colors.black)
+end
+
+-- Startup Handshake Initialization
+findServer()
+
+-- Interface Loop Processing
+while true do
+    syncBoard()
+    drawBoard()
+    
+    local event, key = os.pullEvent("key")
+    
+    if key == keys.q then
+        term.clear()
+        term.setCursorPos(1,1)
+        break
+    elseif key == keys.r then
+        syncBoard()
+    elseif key == keys.a then
+        term.clear()
+        print("=== CREATE NEW TASK ===")
+        print("Select Status Group Column:")
+        print("1. TODO\n2. IN PROGRESS\n3. DONE")
+        write("Enter Choice (1-3): ")
+        local num = read()
+        local col = num == "2" and "2. IN PROGRESS" or (num == "3" and "3. DONE" or "1. TODO")
+        
+        write("Task Title: ")
+        local title = read()
+        write("Task Description Summary: ")
+        local desc = read()
+        
+        if title ~= "" then addTask(col, title, desc) end
+        
+    elseif key == keys.m then
+        term.clear()
+        print("=== MOVE TASK STATUS ===")
+        write("Source Column index (1-3): ")
+        local fromNum = read()
+        local colKeys = {"1. TODO", "2. IN PROGRESS", "3. DONE"}
+        local fromCol = colKeys[tonumber(fromNum)]
+        
+        if fromCol and BOARD_DATA[fromCol] and #BOARD_DATA[fromCol] > 0 then
+            write("Enter Task Row Item Index: ")
+            local tIdx = tonumber(read())
+            
+            if tIdx and BOARD_DATA[fromCol][tIdx] then
+                write("Target Target destination Column (1-3): ")
+                local toNum = read()
+                local toCol = colKeys[tonumber(toNum)]
+                
+                if toCol then
+                    moveTask(fromCol, toCol, tIdx)
+                end
+            end
+        end
+    end
+end

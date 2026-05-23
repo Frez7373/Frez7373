@@ -1,0 +1,151 @@
+local MODEM_SIDE = "top" 
+local CREDENTIALS_FILE = "cloud_auth.txt" -- Файл для хранения твоих данных на клиенте
+
+rednet.open(MODEM_SIDE)
+
+local function findServers()
+    local ids = { rednet.lookup("cloud_disk") }
+    if #ids == 1 and type(ids[1]) == "number" then return ids end
+    if #ids == 0 or ids[1] == nil then return {} end
+    return ids
+end
+
+local serverIDs = findServers()
+if #serverIDs == 0 then
+    print("Error: No Cloud Servers found!")
+    return
+end
+
+print("Connected to " .. #serverIDs .. " Server(s).")
+
+-- Переменные для авторизации
+local username = ""
+local password = ""
+
+-- Проверяем, сохранен ли пароль локально
+if fs.exists(CREDENTIALS_FILE) then
+    local file = fs.open(CREDENTIALS_FILE, "r")
+    local saved = textutils.unserialize(file.readAll())
+    file.close()
+    if saved and saved.username and saved.password then
+        username = saved.username
+        password = saved.password
+        print("Logged in automatically as: " .. username)
+    end
+end
+
+-- Если файла нет или он пустой, запрашиваем ввод
+if username == "" or password == "" then
+    write("Username: ")
+    username = read()
+    write("Password: ")
+    password = read("*") 
+    
+    -- Сразу сохраняем введенные данные в файл, чтобы не забыть
+    local file = fs.open(CREDENTIALS_FILE, "w")
+    file.write(textutils.serialize({username = username, password = password}))
+    file.close()
+end
+
+local function sendRequest(payload, requireAll)
+    payload.username = username
+    payload.password = password
+    serverIDs = findServers()
+    
+    if #serverIDs == 0 then
+        print("Error: All servers offline!")
+        return nil
+    end
+
+    if requireAll then
+        local lastResponse = nil
+        for _, sID in ipairs(serverIDs) do
+            rednet.send(sID, payload, "cloud_disk")
+            local id, response = rednet.receive("cloud_disk", 1.5)
+            if response then lastResponse = response end
+        end
+        return lastResponse
+    end
+    
+    for _, sID in ipairs(serverIDs) do
+        rednet.send(sID, payload, "cloud_disk")
+        local id, response = rednet.receive("cloud_disk", 1.5)
+        if response then return response end
+    end
+    print("Error: Timeout.")
+    return nil
+end
+
+local function printHelp()
+    print("\nCommands: register, list, upload <f>, download <f>, delete <f>, logout, exit")
+end
+
+printHelp()
+
+while true do
+    write("\n" .. username .. "@cloud> ")
+    local input = read()
+    local parts = {}
+    for word in input:gmatch("%S+") do table.insert(parts, word) end
+    local command = parts[1]
+    local argument = parts[2]
+
+    if command == "exit" then break
+    elseif command == "register" then
+        local res = sendRequest({action = "register"}, true)
+        if res then 
+            if res.success then
+                print("Server response: " .. (res.msg or "Success"))
+            else
+                print("Error: " .. tostring(res.error))
+            end
+        end
+    elseif command == "list" then
+        local res = sendRequest({action = "list"}, false)
+        if res then
+            if res.success then
+                for _, filename in ipairs(res.files) do print("- " .. filename) end
+            else
+                print("Error: " .. tostring(res.error))
+            end
+        end
+    elseif command == "upload" then
+        if not argument or not fs.exists(argument) then print("Invalid file")
+        else
+            local file = fs.open(argument, "r")
+            local content = file.readAll()
+            file.close()
+            local res = sendRequest({action = "upload", filename = argument, content = content}, true)
+            if res then 
+                if res.success then print(res.msg or "Uploaded")
+                else print("Error: " .. tostring(res.error)) end
+            end
+        end
+    elseif command == "download" then
+        if not argument then print("Usage: download <filename>")
+        else
+            local res = sendRequest({action = "download", filename = argument}, false)
+            if res and res.success then
+                local file = fs.open(argument, "w")
+                file.write(res.content)
+                file.close()
+                print("Downloaded successfully.")
+            else 
+                print("Error: File not found or Auth error.") 
+            end
+        end
+    elseif command == "delete" then
+        if argument then 
+            local res = sendRequest({action = "delete", filename = argument}, true)
+            if res and res.success then print(res.msg or "Deleted") 
+            else print("Error or access denied.") end
+        end
+    -- Добавил команду сброса авторизации на случай, если захочешь сменить аккаунт
+    elseif command == "logout" then
+        if fs.exists(CREDENTIALS_FILE) then fs.delete(CREDENTIALS_FILE) end
+        print("Logged out. Please restart the program.")
+        break
+    else
+        printHelp()
+    end
+end

@@ -1,0 +1,43 @@
+-- Installer for Consult
+local TARGET_URL = "https://github.com/1Turtle/consult/releases/latest/download/cosu.lua"
+local DEST_PATH = "consult.lua"
+
+-- Utility for colored text
+local function printc(text, color)
+    term.setTextColor(color)
+    print(text)
+    term.setTextColor(colors.white)
+end
+
+term.clear()
+term.setCursorPos(1, 1)
+
+printc("=== Consult Installer ===", colors.cyan)
+print("Preparing to download...")
+
+-- Check for http access
+if not http then
+    printc("Error: HTTP API is disabled.", colors.red)
+    print("Please enable it in your server/mod configuration.")
+    return
+end
+
+print("Downloading from GitHub...")
+
+local response = http.get(TARGET_URL)
+
+if not response then
+    printc("Error: Failed to connect to GitHub.", colors.red)
+    return
+end
+
+-- Write file
+local file = fs.open(DEST_PATH, "w")
+file.write(response.readAll())
+file.close()
+response.close()
+
+-- Finish
+printc("\nSuccessfully installed!", colors.green)
+print("File saved as: " .. DEST_PATH)
+print("Run it by typing: " .. DEST_PATH:gsub(".lua", ""))

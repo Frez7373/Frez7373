@@ -1,0 +1,200 @@
+local MODEM_SIDE = "top"
+rednet.open(MODEM_SIDE)
+
+local DNS_USER = "dns_root_system_v2"
+local DNS_PASS = "global_dns_password_123"
+local DNS_FILE = "domains.txt"
+
+-- --- УТИЛИТЫ ---
+local function findServers()
+    local ids = { rednet.lookup("cloud_disk") }
+    if #ids == 1 and type(ids[1]) == "number" then return ids end
+    return (#ids == 0 or ids[1] == nil) and {} or ids
+end
+
+local function sendRequest(user, pass, payload)
+    payload.username = user
+    payload.password = pass
+    local serverIDs = findServers()
+    if #serverIDs == 0 then return nil end
+    for _, sID in ipairs(serverIDs) do
+        rednet.send(sID, payload, "cloud_disk")
+        local id, response = rednet.receive("cloud_disk", 1.5)
+        if response then return response end
+    end
+    return nil
+end
+
+local function getDNS()
+    local serverIDs = findServers()
+    if #serverIDs == 0 then return {} end
+    for _, sID in ipairs(serverIDs) do
+        local payload = {username = DNS_USER, password = DNS_PASS, action = "download", filename = DNS_FILE}
+        rednet.send(sID, payload, "cloud_disk")
+        local id, response = rednet.receive("cloud_disk", 2.0)
+        if response and response.success then
+            return textutils.unserialize(response.content) or {}
+        end
+    end
+    return {}
+end
+
+local function saveDNS(dnsData)
+    local content = textutils.serialize(dnsData)
+    sendRequest(DNS_USER, DNS_PASS, {action = "upload", filename = DNS_FILE, content = content})
+end
+
+-- --- ПАРСЕР "HTML" ---
+local function drawFormattedText(text)
+    local startX, startY = term.getCursorPos()
+    local w, _ = term.getSize()
+    
+    -- Замена тегов на разделители
+    local parts = {text:gsub("%[/?(%w+):?(%w*)%]", "§%1:%2§")}
+    local content = parts[1]
+    
+    local curX, curY = startX, startY
+    for segment in content:gmatch("[^§]+") do
+        if segment:sub(1,1) == ":" or (segment:find(":") and not segment:find("[a-z]")) then
+            -- Обработка тега
+            local tag = segment:gsub(":", "")
+            if tag == "b" then term.setTextColor(colors.yellow)
+            elseif tag == "/b" or tag == "/color" then term.setTextColor(colors.white)
+            elseif tag:find("color") then
+                local c = tag:sub(6)
+                if colors[c] then term.setTextColor(colors[c]) end
+            end
+        else
+            -- Вывод текста
+            term.write(segment)
+        end
+    end
+end
+
+local function cleanText(text)
+    if type(text) ~= "string" then return "" end
+    text = text:gsub("%[([^%-%>]+)%-%>[^%]]+%]", "%1")
+    return text:gsub("%[%/?%w+:?%w*%]", "")
+end
+
+local function extractLinks(text)
+    local links = {}
+    for name, domain in text:gmatch("%[([^%-%>]+)%-%>([^%]]+)%]") do
+        table.insert(links, { name = name, domain = domain:gsub("%s+", ""):lower() })
+    end
+    return links
+end
+
+-- --- ИНТЕРФЕЙС ---
+local function createSiteManager()
+    term.clear()
+    term.setCursorPos(1,1)
+    print("=== Регистрация сайта ===")
+    write("Домен: cloud://")
+    local domain = read():lower()
+    local dns = getDNS()
+    if dns[domain] then print("Ошибка: Занято!") sleep(2) return end
+    
+    print("\nКонтент (используй [color:red]...[/color] для цветов, [b]...[/b] для жирного):")
+    print("Тип ссылок: [Имя->домен]. Завершить: :w")
+    local lines = {}
+    while true do
+        local line = read()
+        if line == ":w" then break end
+        table.insert(lines, line)
+    end
+    dns[domain] = { type = "text", content = table.concat(lines, "\n") }
+    saveDNS(dns)
+    print("Опубликовано!")
+    sleep(1)
+end
+
+local function runAsApplication(domain, code)
+    local tempPath = ".app_" .. domain .. ".lua"
+    local file = fs.open(tempPath, "w")
+    file.write(code)
+    file.close()
+    pcall(shell.run, tempPath)
+    if fs.exists(tempPath) then fs.delete(tempPath) end
+end
+
+local navButtons = {}
+local clickableContent = {}
+
+local function drawBrowser(mode, target, data, activeLinks)
+    term.clear()
+    local w, h = term.getSize()
+    clickableContent = {}
+    
+    term.setBackgroundColor(colors.blue)
+    term.setCursorPos(1,1)
+    term.clearLine()
+    write(mode == "page" and " URL: cloud://"..target or " CloudNet")
+    
+    term.setBackgroundColor(colors.black)
+    if mode == "page" and data then
+        term.setCursorPos(1, 2)
+        drawFormattedText(data)
+        
+        if #activeLinks > 0 then
+            term.setCursorPos(1, h-1)
+            term.setTextColor(colors.cyan)
+            write(" Ссылки: ")
+            for i, link in ipairs(activeLinks) do
+                local s = " "..link.name.." "
+                local x = term.getCursorPos()
+                term.setBackgroundColor(colors.cyan)
+                term.setTextColor(colors.black)
+                write(s)
+                table.insert(clickableContent, {x1=x, x2=x+#s-1, y=h-1, domain=link.domain})
+                term.setBackgroundColor(colors.black)
+                write(" ")
+            end
+        end
+    end
+    
+    term.setBackgroundColor(colors.gray)
+    term.setCursorPos(1, h)
+    term.clearLine()
+    navButtons = {
+        {t="Поиск", x1=1, x2=6, a="search"},
+        {t="Создать", x1=8, x2=15, a="create"},
+        {t="Домой", x1=17, x2=23, a="home"}
+    }
+    for _, b in ipairs(navButtons) do
+        term.setCursorPos(b.x1, h)
+        write(b.t)
+    end
+end
+
+-- --- ГЛАВНЫЙ ЦИКЛ ---
+local viewMode, viewTarget, viewData, activeLinks = "main", "", nil, {}
+
+while true do
+    drawBrowser(viewMode, viewTarget, viewData, activeLinks)
+    local event, p1, p2, p3 = os.pullEvent()
+    if event == "mouse_click" then
+        if p3 == select(2, term.getSize()) then
+            for _, b in ipairs(navButtons) do
+                if p2 >= b.x1 and p2 <= b.x2 then
+                    if b.a == "create" then createSiteManager()
+                    elseif b.a == "search" then 
+                        term.setCursorPos(1, 1); write("Введите домен: ")
+                        local d = read()
+                        local dns = getDNS()
+                        if dns[d] then viewMode="page"; viewTarget=d; viewData=dns[d].content; activeLinks=extractLinks(viewData) end
+                    else viewMode="main"; viewData=nil end
+                end
+            end
+        else
+            for _, c in ipairs(clickableContent) do
+                if p3 == c.y and p2 >= c.x1 and p2 <= c.x2 then
+                    local dns = getDNS()
+                    viewTarget = c.domain
+                    viewData = dns[c.domain].content
+                    activeLinks = extractLinks(viewData)
+                end
+            end
+        end
+    end
+end

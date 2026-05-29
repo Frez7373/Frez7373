@@ -1,0 +1,94 @@
+-- print_hub.lua
+
+-- Функция для получения списка всех подключенных принтеров
+local function getPrinters()
+    local printers = {}
+    for name, _ in pairs(peripheral.find("printer")) do
+        table.insert(printers, {name = name, selected = false})
+    end
+    return printers
+end
+
+-- Функция для получения содержимого файла и разбивки его на страницы
+local function getPages(filename)
+    local file = fs.open(filename, "r")
+    local lines = {}
+    while true do
+        local line = file.readLine()
+        if not line then break end
+        table.insert(lines, line)
+    end
+    file.close()
+
+    local pages = {}
+    local currentPage = {}
+    -- Ограничение: 20 строк на страницу (стандарт для принтера)
+    for i, line in ipairs(lines) do
+        table.insert(currentPage, line)
+        if i % 20 == 0 or i == #lines then
+            table.insert(pages, currentPage)
+            currentPage = {}
+        end
+    end
+    return pages
+end
+
+local printers = getPrinters()
+if #printers == 0 then
+    error("No printers found!")
+end
+
+-- Выбор принтеров
+print("Available printers:")
+for i, p in ipairs(printers) do
+    print(i .. ") " .. p.name)
+end
+print("Enter printer numbers (e.g., '1 2') or 'all':")
+local input = read()
+
+if input == "all" then
+    for _, p in ipairs(printers) do p.selected = true end
+else
+    for word in input:gmatch("%S+") do
+        local idx = tonumber(word)
+        if idx and printers[idx] then printers[idx].selected = true end
+    end
+end
+
+-- Выбор файла
+local files = fs.list("/")
+print("\nFiles in root:")
+for i, file in ipairs(files) do
+    print(i .. ") " .. file)
+end
+print("Enter file number:")
+local fileIdx = tonumber(read())
+local fileName = files[fileIdx]
+
+if not fileName or fs.isDir(fileName) then
+    error("Invalid file!")
+end
+
+local pages = getPages(fileName)
+
+-- Процесс печати с поддержкой нескольких страниц
+for _, p in ipairs(printers) do
+    if p.selected then
+        local printer = peripheral.wrap(p.name)
+        print("Printing on " .. p.name .. "...")
+        
+        for _, page in ipairs(pages) do
+            if printer.newPage() then
+                for lineIdx, line in ipairs(page) do
+                    printer.setCursorPos(1, lineIdx)
+                    printer.write(line)
+                end
+                printer.endPage()
+            else
+                print("Error: Printer " .. p.name .. " is out of paper or ink.")
+                break
+            end
+        end
+        print("Finished " .. p.name)
+    end
+end
